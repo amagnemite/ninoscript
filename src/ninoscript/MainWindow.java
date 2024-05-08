@@ -5,7 +5,10 @@ import java.awt.Dimension;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.io.File;
+import java.io.FileWriter;
 import java.io.FilenameFilter;
+import java.io.IOException;
+import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -32,6 +35,8 @@ import javax.swing.ListSelectionModel;
 import javax.swing.SpinnerNumberModel;
 import javax.swing.UIManager;
 import javax.swing.filechooser.FileFilter;
+
+import ninoscript.ScriptReader.BlockData;
 
 @SuppressWarnings("serial")
 public class MainWindow extends JFrame {
@@ -184,14 +189,52 @@ public class MainWindow extends JFrame {
 	private void loadFolder(File dir) {
 		fileListModel.clear();
 		scriptMap.clear();
+		FileWriter fw;
+		PrintWriter pw;
+		
+		List<String> speakerStrings = new ArrayList<String>();
+		int largestBlock = 0;
+		
+		try {
+			fw = new FileWriter("output.txt");
+		}
+		catch (IOException i) {
+			return;
+		}
+		
+		pw = new PrintWriter(fw, true);
 		
 		for(File file: dir.listFiles(new BinFileFilter())) {
 			ScriptReader script = new ScriptReader(file);
 			scriptMap.put(script, file);
 			fileListModel.addElement(script);
+			for(BlockData data : script.getBlockList()) {
+				if(data.getFullBlockLength() > largestBlock) {
+					largestBlock = data.getFullBlockLength();
+				}
+				
+				if(data.getSpeakerBytes() != null) {
+					if(!speakerStrings.contains(data.getSpeakerBytesString())) {
+						speakerStrings.add(data.getSpeakerBytesString());
+					}
+					
+				}
+			}
+		}
+		
+		pw.println(largestBlock);
+		pw.println("");
+		for(String string : speakerStrings) {
+			pw.println(string);
 		}
 		
 		fileList.setSelectedIndex(0);
+		
+		pw.close();
+		try {
+			fw.close();
+		} catch (IOException e) {
+		}
 	}
 	
 	private void addGB(Component comp, int x, int y) {
