@@ -13,8 +13,8 @@ public class ScriptReader {
 	private static final int SCRIPTNAMEINDEX = 8;
 	private static final byte m = 0x6D;
 	private static final byte p = 0x70;
-	private static final byte DASH = 0x2D;
-	private static final byte SPACE = 0x20;
+	//private static final byte DASH = 0x2D;
+	//private static final byte SPACE = 0x20;
 	
 	private String scriptName;
 	private List<BlockData> blockList = new ArrayList<BlockData>();
@@ -45,7 +45,7 @@ public class ScriptReader {
 			nameBytes[i - 1] = fullFileBytes[SCRIPTNAMEINDEX + i];
 		}
 		scriptName = new String(nameBytes);
-		System.out.println(scriptName);
+		//System.out.println(scriptName);
 		
 		for(int i = 0; i < fullFileBytes.length; i++) {
 			byte b = fullFileBytes[i];
@@ -102,7 +102,6 @@ public class ScriptReader {
 		byte[] speakerBytes = null;
 		int speakerLength = 0;
 		int speakerStart = 0;
-		String speakerBytesString = null;
 
 		int fullBlockLength = fullFileBytes[shift + 1] & 0xFF;
 		
@@ -138,7 +137,7 @@ public class ScriptReader {
 						continue;
 					}
 					else {
-						speakerBytes = parseSpeaker(nextByte, nextByte2, nextByte3, shift, fullFileBytes, speakerBytesString);
+						speakerBytes = parseSpeaker(nextByte, nextByte2, nextByte3, shift, fullFileBytes);
 						
 						if(speakerBytes != null) {
 							speakerLength = nextByte2;
@@ -159,7 +158,7 @@ public class ScriptReader {
 					shift += 1 + (fullFileBytes[shift] & 0xFF);
 				}
 				else { //all we know is sub 0x0F val
-					speakerBytes = parseSpeaker(nextByte, nextByte2, nextByte3, shift, fullFileBytes, speakerBytesString);
+					speakerBytes = parseSpeaker(nextByte, nextByte2, nextByte3, shift, fullFileBytes);
 										
 					if(speakerBytes != null) {
 						speakerLength = nextByte2;
@@ -175,20 +174,11 @@ public class ScriptReader {
 				shift++;
 			}
 		}
-		
-		if(speakerBytes != null && Byte.toUnsignedInt(speakerBytes[0]) > 0x7F) {
-			System.out.println(speakerStart + " " + new String(speakerBytes, StandardCharsets.US_ASCII));
-		}
-		
-		if(speakerBytes != null && Byte.toUnsignedInt(speakerBytes[0]) == 0x44) {
-			System.out.println(speakerStart + " " + new String(speakerBytes, StandardCharsets.US_ASCII));
-		}
-		
-		speakerBytesString = speakerBytes == null ? null : new String(speakerBytes, StandardCharsets.US_ASCII);
-		return new BlockData(fullBlockLength, textLength, textStart, speakerStart, speakerLength, textBytes, speakerBytes, speakerBytesString);
+	
+		return new BlockData(fullBlockLength, textLength, textStart, speakerStart, speakerLength, textBytes, speakerBytes);
 	}
 	
-	private byte[] parseSpeaker(int nextByte, int nextByte2, int nextByte3, int shift, byte[] fullFileBytes, String speakerBytesString) {
+	private byte[] parseSpeaker(int nextByte, int nextByte2, int nextByte3, int shift, byte[] fullFileBytes) {
 		if(nextByte < 0x05 && nextByte2 < 0x0F) {
 			if((nextByte3 >= 0x41 && nextByte3 <= 0x5A) || (nextByte3 >= 0x61 && nextByte3 <= 0x7A)) {
 				//' is also used
@@ -202,14 +192,6 @@ public class ScriptReader {
 				for(int i = 0; i < speakerLength; i++) {
 					speakerBytes[i] = fullFileBytes[speakerStart + i];
 				}
-				
-				System.out.println(fullFileBytes[shift] + " " + fullFileBytes[shift + 1] + " " + fullFileBytes[shift + 2] +
-						" " + new String(speakerBytes, StandardCharsets.US_ASCII));
-				
-				speakerBytesString = fullFileBytes[shift] + " " + fullFileBytes[shift + 1] + " " + fullFileBytes[shift + 2] +
-						" " + new String(speakerBytes, StandardCharsets.US_ASCII);
-				
-				
 				return speakerBytes;
 			}
 			else {
@@ -220,7 +202,6 @@ public class ScriptReader {
 			return null;
 		}
 	}
-	
 	
 	public String toString() {
 		return scriptName;
@@ -239,10 +220,9 @@ public class ScriptReader {
 		
 		private byte[] textBytes;
 		private byte[] speakerBytes;
-		private String speakerBytesString;
 		
 		public BlockData(int fullBlockLength, int textLength, int textStart, int speakerStart, int speakerLength,
-				byte[] textBytes, byte[] speakerBytes, String speakerBytesString) {
+				byte[] textBytes, byte[] speakerBytes) {
 			this.fullBlockLength = fullBlockLength;
 			this.textLength = textLength;
 			this.textStart = textStart;
@@ -250,11 +230,6 @@ public class ScriptReader {
 			this.speakerStart = speakerStart;
 			this.textBytes = textBytes;
 			this.speakerBytes = speakerBytes;
-			this.speakerBytesString = speakerBytesString;
-		}
-		
-		public String getSpeakerBytesString() {
-			return speakerBytesString;
 		}
 
 		public int getFullBlockLength() {
