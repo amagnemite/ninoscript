@@ -217,7 +217,6 @@ public class MainWindow extends JFrame {
 					if(!speakerStrings.contains(data.getSpeakerBytesString())) {
 						speakerStrings.add(data.getSpeakerBytesString());
 					}
-					
 				}
 			}
 		}
