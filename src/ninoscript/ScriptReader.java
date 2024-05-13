@@ -6,6 +6,7 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 public class ScriptReader {
@@ -16,11 +17,11 @@ public class ScriptReader {
 	//private static final byte DASH = 0x2D;
 	//private static final byte SPACE = 0x20;
 	
+	private byte[] fullFileBytes;
 	private String scriptName;
 	private List<BlockData> blockList = new ArrayList<BlockData>();
 	
 	public ScriptReader(File file) {
-		byte[] fullFileBytes;
 		try {
 			FileInputStream input = new FileInputStream(file);
 			fullFileBytes = new byte[input.available()];
@@ -100,8 +101,8 @@ public class ScriptReader {
 		int shift = start; //starts at the 05 loc
 		byte[] textBytes;
 		byte[] speakerBytes = null;
-		int speakerLength = 0;
-		int speakerStart = 0;
+		int speakerLength = -1;
+		int speakerStart = -1;
 
 		int fullBlockLength = fullFileBytes[shift + 1] & 0xFF;
 		
@@ -211,6 +212,10 @@ public class ScriptReader {
 		return blockList;
 	}
 	
+	public byte[] getFullFileBytes() {
+		return fullFileBytes;
+	}
+	
 	public static class BlockData {
 		private int fullBlockLength;
 		private int textLength;
@@ -220,6 +225,10 @@ public class ScriptReader {
 		
 		private byte[] textBytes;
 		private byte[] speakerBytes;
+		private String textString;
+		private String speakerString = null;
+		private String newTextString;
+		private String newSpeakerString;
 		
 		public BlockData(int fullBlockLength, int textLength, int textStart, int speakerStart, int speakerLength,
 				byte[] textBytes, byte[] speakerBytes) {
@@ -230,6 +239,76 @@ public class ScriptReader {
 			this.speakerStart = speakerStart;
 			this.textBytes = textBytes;
 			this.speakerBytes = speakerBytes;
+
+			String unicodeText = new String();
+			
+			byte[] sorted = Arrays.copyOf(textBytes, textBytes.length);
+			Arrays.sort(sorted);
+			if(Arrays.binarySearch(sorted, MainWindow.FULLWIDTHMARKER) > -1) {
+				//only iterate through the array if there's a fullwidth char
+				int i = 0;
+				byte[] buffer = new byte[textBytes.length];
+				int bufferIndex = 0;
+				
+				while(i < textBytes.length) {
+					byte b = textBytes[i];
+					if(b == MainWindow.FULLWIDTHMARKER) {
+						byte nextChar = textBytes[i+1];
+						String equivalent = null;
+						if(nextChar == MainWindow.ELLIPSE) {
+							equivalent = MainWindow.ELLIPSESTRING;
+						}
+						else if(nextChar == MainWindow.OPENAPOSTROPHE || nextChar == MainWindow.CLOSEAPOSTROPHE) {
+							equivalent = "\"";
+						}
+						
+						unicodeText = unicodeText + new String(Arrays.copyOf(buffer, bufferIndex)) + equivalent;
+						buffer = new byte[textBytes.length];
+						i += 2;
+						bufferIndex = 0;
+					}
+					else {
+						buffer[bufferIndex] = textBytes[i];
+						i++;
+						bufferIndex++;
+					}
+				}
+				
+				if(bufferIndex > 0) {
+					unicodeText = unicodeText + new String(Arrays.copyOf(buffer, bufferIndex));
+				}
+				textString = unicodeText;
+			}
+			else {
+				textString = new String(textBytes);
+			}
+			
+			if(speakerBytes != null) {
+				speakerString = new String(speakerBytes);
+			}
+			
+			newTextString = textString;
+			newSpeakerString = speakerString;
+		}
+		
+		public boolean hasSpeaker() {
+			return speakerBytes != null;
+		}
+
+		public String getNewTextString() {
+			return newTextString;
+		}
+
+		public void setNewTextString(String newTextString) {
+			this.newTextString = newTextString;
+		}
+
+		public String getNewSpeakerString() {
+			return newSpeakerString;
+		}
+
+		public void setNewSpeakerString(String newSpeakerString) {
+			this.newSpeakerString = newSpeakerString;
 		}
 
 		public int getFullBlockLength() {
@@ -288,5 +367,20 @@ public class ScriptReader {
 			this.speakerBytes = speakerBytes;
 		}
 		
+		public String getTextString() {
+			return textString;
+		}
+
+		public void setTextString(String textString) {
+			this.textString = textString;
+		}
+
+		public String getSpeakerString() {
+			return speakerString;
+		}
+
+		public void setSpeakerString(String speakerString) {
+			this.speakerString = speakerString;
+		}
 	}
 }

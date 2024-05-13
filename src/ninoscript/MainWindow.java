@@ -1,16 +1,17 @@
 package ninoscript;
 
-import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
 import java.io.File;
-import java.io.FileWriter;
-import java.io.FilenameFilter;
+import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.PrintWriter;
+import java.nio.ByteBuffer;
+import java.nio.CharBuffer;
+import java.nio.charset.CharsetEncoder;
+import java.nio.charset.CoderResult;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -19,7 +20,6 @@ import java.util.List;
 import java.util.Map;
 
 import javax.swing.BorderFactory;
-import javax.swing.BoxLayout;
 import javax.swing.DefaultListModel;
 import javax.swing.DefaultListSelectionModel;
 import javax.swing.JButton;
@@ -38,16 +38,24 @@ import javax.swing.JTextField;
 import javax.swing.ListSelectionModel;
 import javax.swing.SpinnerNumberModel;
 import javax.swing.UIManager;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentEvent.EventType;
+import javax.swing.event.DocumentListener;
 import javax.swing.filechooser.FileFilter;
+import javax.swing.text.Document;
 
 import ninoscript.ScriptReader.BlockData;
 
 @SuppressWarnings("serial")
 public class MainWindow extends JFrame {
-	private static final byte FULLWIDTHMARKER = Integer.valueOf(0x81).byteValue();
-	private static final byte ELLIPSE = Integer.valueOf(0x63).byteValue();
-	private static final byte OPENAPOSTROPHE = Integer.valueOf(0x67).byteValue();
-	private static final byte CLOSEAPOSTROPHE = Integer.valueOf(0x68).byteValue();
+	public static final byte FULLWIDTHMARKER = Integer.valueOf(0x81).byteValue();
+	public static final byte ELLIPSE = Integer.valueOf(0x63).byteValue();
+	public static final byte OPENAPOSTROPHE = Integer.valueOf(0x67).byteValue();
+	public static final byte CLOSEAPOSTROPHE = Integer.valueOf(0x68).byteValue();
+	private static final int MAXLINES = 6;
+	
+	public static final String ELLIPSESTRING = "…";
+	private static final byte APOSTROPHE = 0x22;
 	
 	JMenuBar menuBar = new JMenuBar();
 	JMenu optionsMenu = new JMenu("Options");
@@ -70,9 +78,18 @@ public class MainWindow extends JFrame {
 	LengthPanel originalLengths = new LengthPanel();
 	LengthPanel newLengths = new LengthPanel();
 	
+	private boolean setText = true;
+	
 	private Map<ScriptReader, File> scriptMap = new HashMap<ScriptReader, File>();
 	private ScriptReader currentScript;
 	private BlockData currentBlock;
+	private List<Integer> textLengths = new ArrayList<Integer>();
+	private List<Integer> speakerLengths = new ArrayList<Integer>();
+	private List<Integer> newTextStarts = new ArrayList<Integer>();
+	private List<Integer> newSpeakerStarts = new ArrayList<Integer>();
+	private List<byte[]> originalBlocks;
+	private List<byte[]> newBytes = new ArrayList<byte[]>();
+	private int[] newLineLocs = {-1, -1, -1, -1, -1, -1};
 	
 	private GridBagConstraints gbcon = new GridBagConstraints();
 	
@@ -105,20 +122,9 @@ public class MainWindow extends JFrame {
 		blockPanel.add(blockMaxLabel);
 		//blockSpinner.setPreferredSize(new Dimension(blockSpinner.getPreferredSize().width + 10, blockSpinner.getPreferredSize().height));
 		
-		/*
-		JPanel originalTextPanel = new JPanel();
-		originalTextPanel.setLayout(new BoxLayout(originalTextPanel, BoxLayout.X_AXIS));
-		originalTextPanel.setBorder(BorderFactory.createCompoundBorder(
-				BorderFactory.createTitledBorder("Original text"), BorderFactory.createEmptyBorder(5, 5, 5, 5)));
-		originalTextPanel.add(originalText);
-		originalTextPanel.add(originalLengths);
-		*/
-		
 		JPanel originalTextPanel = new JPanel();
 		originalTextPanel.setLayout(new GridBagLayout());
 		GridBagConstraints c = new GridBagConstraints();
-		//originalTextPanel.setBorder(BorderFactory.createCompoundBorder(
-		//		BorderFactory.createTitledBorder("Original text"), BorderFactory.createEmptyBorder(5, 5, 5, 5)));
 		originalTextPanel.setBorder(BorderFactory.createTitledBorder("Original text"));
 		//originalTextPanel.setBackground(Color.WHITE);
 
@@ -135,12 +141,7 @@ public class MainWindow extends JFrame {
 		JPanel newTextPanel = new JPanel();
 		newTextPanel.setLayout(new GridBagLayout());
 		c = new GridBagConstraints();
-		//newTextPanel.setLayout(new BoxLayout(newTextPanel, BoxLayout.X_AXIS));
-		//newTextPanel.setBorder(BorderFactory.createCompoundBorder(
-		//		BorderFactory.createTitledBorder("Modified text"), BorderFactory.createEmptyBorder(5, 5, 5, 5)));
 		newTextPanel.setBorder(BorderFactory.createTitledBorder("Modified text"));
-		//newTextPanel.add(newText);
-		//newTextPanel.add(newLengths);
 		
 		c.gridy = 0;
 		c.gridx = 0;
@@ -153,14 +154,10 @@ public class MainWindow extends JFrame {
 		newTextPanel.add(newLengths, c);
 		
 		JPanel originalSpeakerPanel = new JPanel();
-		//originalSpeakerPanel.setBorder(BorderFactory.createCompoundBorder(
-		//		BorderFactory.createTitledBorder("Original speaker"), BorderFactory.createEmptyBorder(5, 5, 5, 5)));
 		originalSpeakerPanel.setBorder(BorderFactory.createTitledBorder("Original speaker"));
 		originalSpeakerPanel.add(originalSpeakerField);
 		
 		JPanel newSpeakerPanel = new JPanel();
-		//newSpeakerPanel.setBorder(BorderFactory.createCompoundBorder(
-		//		BorderFactory.createTitledBorder("Modified speaker"), BorderFactory.createEmptyBorder(5, 5, 5, 5)));
 		newSpeakerPanel.setBorder(BorderFactory.createTitledBorder("Modified speaker"));
 		newSpeakerPanel.add(newSpeakerField);
 		
@@ -228,10 +225,22 @@ public class MainWindow extends JFrame {
 			
 			if(index != -1) {
 				currentScript = fileList.getSelectedValue();
-				//currentBlock = currentScript.getBlockList().get(0);
 				
+				/*
+				textLengths.clear();
+				speakerLengths.clear();
+				originalBlocks.clear();
+				for(BlockData data : currentScript.getBlockList()) {
+					textLengths.add(data.getTextLength());
+					speakerLengths.add(data.getSpeakerLength());
+					originalBlocks.add(data.getTextBytes());
+				}	
+				*/
+				
+				setText = false;
 				blockSpinnerModel.setValue(0);
 				blockSpinnerModel.setMaximum(currentScript.getBlockList().size() - 1);
+				setText = true;
 				blockMaxLabel.setText("of " + (currentScript.getBlockList().size() - 1));
 			}
 			else {
@@ -245,80 +254,206 @@ public class MainWindow extends JFrame {
 				//clear components
 			}
 			
+			if(setText) {
+				saveText();
+			}
 			currentBlock = currentScript.getBlockList().get((int) blockSpinner.getValue());
-			byte[] text = currentBlock.getTextBytes();
-			String unicodeText = new String();
 			
-			byte[] sorted = Arrays.copyOf(text, text.length);
-			Arrays.sort(sorted);
-			if(Arrays.binarySearch(sorted, FULLWIDTHMARKER) > -1) {
-				//only iterate through the array if there's a fullwidth char
-				int i = 0;
-				byte[] buffer = new byte[text.length];
-				int bufferIndex = 0;
-				
-				while(i < text.length) {
-					byte b = text[i];
-					if(b == FULLWIDTHMARKER) {
-						byte nextChar = text[i+1];
-						String equivalent = null;
-						if(nextChar == ELLIPSE) {
-							equivalent = "…";
-						}
-						else if(nextChar == OPENAPOSTROPHE || nextChar == CLOSEAPOSTROPHE) {
-							equivalent = "\"";
-						}
-						
-						unicodeText = unicodeText + new String(Arrays.copyOf(buffer, bufferIndex)) + equivalent;
-						buffer = new byte[text.length];
-						i += 2;
-						bufferIndex = 0;
-					}
-					else {
-						buffer[bufferIndex] = text[i];
-						i++;
-						bufferIndex++;
-					}
-				}
-				
-				if(bufferIndex > 0) {
-					unicodeText = unicodeText + new String(Arrays.copyOf(buffer, bufferIndex));
-				}
+			updateTextComponents();
+		});
+		
+		newText.getDocument().addDocumentListener(new DocumentListener() {
+			public void changedUpdate(DocumentEvent e) {
+		
 			}
-			else {
-				unicodeText = new String(text);
+
+			public void insertUpdate(DocumentEvent e) {
+				
+			}
+
+			public void removeUpdate(DocumentEvent e) {
+				
 			}
 			
-			updateTextComponents(unicodeText);
+			public void update(DocumentEvent e) {
+				Document doc = e.getDocument();
+				int changeLength = e.getLength();
+				int arrayIndex = 0;
+				int offset = e.getOffset();
+				EventType type = e.getType();
+				
+				e.getChange(null);
+				
+				for(int i = 0; i < 6; i++) {
+					int newLinePos = newLineLocs[i];
+					if(offset > newLinePos) {
+						continue;
+					}
+					
+					arrayIndex = i;
+					break;
+				}
+			
+				if(type == EventType.INSERT) {
+					
+				}
+				else if(type == EventType.REMOVE) {
+					//if()
+				}
+			}
+		});
+		
+		saveButton.addActionListener(event -> {
+			writeFile();
 		});
 	}
 	
-	private void updateTextComponents(String text) {
-		originalText.setText(text);
-		newText.setText(text);
+	private void updateTextComponents() {
+		originalText.setText(currentBlock.getTextString());
+		newText.setText(currentBlock.getNewTextString());
 		
-		if(currentBlock.getSpeakerBytes() != null) {
-			String speaker = new String(currentBlock.getSpeakerBytes());
-			originalSpeakerField.setText(speaker);
-			newSpeakerField.setText(speaker);
+		if(currentBlock.getSpeakerString() != null) {
+			originalSpeakerField.setText(currentBlock.getSpeakerString());
+			newSpeakerField.setText(currentBlock.getNewSpeakerString());
 		}
 		else {
 			originalSpeakerField.setText("");
 			newSpeakerField.setText("");
 		}
 		
-		String[] splits = text.split("\n");
+		String[] splits = currentBlock.getTextString().split("\n");
 		int i = 0;
+		int loc = 0;
 		while(i < splits.length) {
 			originalLengths.setLabelText(i, splits[i].length());
 			newLengths.setLabelText(i, splits[i].length());
+			newLineLocs[i] = loc + splits[i].length() + 1;
+			loc += newLineLocs[i];
 			i++;
 		}
 		while(i < 6) {
 			originalLengths.setLabelText(i, -1);
 			newLengths.setLabelText(i, -1);
+			newLineLocs[i] = -1;
 			i++;
 		}
+	}
+	
+	private void saveText() {
+		currentBlock.setNewTextString(newText.getText());
+		if(currentBlock.hasSpeaker()) {
+			currentBlock.setNewSpeakerString(newSpeakerField.getText());
+		}
+	}
+	
+	private void writeFile() {
+		FileOutputStream fw = null;
+		int originalFileIndex = 0;
+		byte[] fullFileBytes = currentScript.getFullFileBytes();
+		final int BLOCKOFFSET = -5; //five back from text start
+		final int SPEAKEROFFSET = -1; //one back from speaker start
+		final byte[] HEADERCHUNK = {0x00, 0x01};
+		
+		saveText();
+		
+		try {
+			fw = new FileOutputStream(scriptMap.get(currentScript));
+		} catch (IOException e) {
+			return;
+		}
+		
+		for(BlockData block: currentScript.getBlockList()) {
+			byte[] unparsedStringBytes = block.getNewTextString().getBytes(StandardCharsets.UTF_8);
+			byte[] newSpeakerBytes = block.getSpeakerString() != null ? block.getNewSpeakerString().getBytes(StandardCharsets.UTF_8) : null;
+			byte[] buffer = new byte[unparsedStringBytes.length * 3];
+			int newStringLength = 0;
+			byte[] newStringBytes;
+			boolean openApostrophe = false;
+			int newBlockLength = 0;
+			int oldBlockHeaderStart = block.getTextStart() + BLOCKOFFSET;
+			int speakerSizeDiff = 0;
+			
+			for(int i = 0; i < unparsedStringBytes.length; i++) {
+				byte b = unparsedStringBytes[i];
+				int unsignedB = Byte.toUnsignedInt(b);
+				if(unsignedB < 0x7F) {
+					if(unsignedB == APOSTROPHE) { //replace apostrophes with the fullwidth open/close
+						buffer[newStringLength] = FULLWIDTHMARKER;
+						newStringLength++;
+						if(!openApostrophe) {
+							buffer[newStringLength] = OPENAPOSTROPHE;
+						}
+						else {
+							buffer[newStringLength] = CLOSEAPOSTROPHE;
+						}
+						openApostrophe = !openApostrophe;
+						newStringLength++;
+					}
+					else {
+						buffer[newStringLength] = b;
+						newStringLength++;
+					}
+				}
+				else {
+					//it goes down here for the other two ellipses bytes
+					//if there's any fullwidths with sub 7F, loop needs to change
+					if(unsignedB == 0xE2) { //TODO: update this if any other fullwidths get added
+						buffer[newStringLength] = FULLWIDTHMARKER;
+						buffer[newStringLength + 1] = ELLIPSE;
+						newStringLength += 2;
+					}
+				}
+			}
+			newStringBytes = Arrays.copyOf(buffer, newStringLength);
+			
+			if(block.hasSpeaker()) {
+				speakerSizeDiff = newSpeakerBytes.length - block.getSpeakerLength();
+			}
+			
+			newBlockLength = block.getFullBlockLength() + (newStringLength - block.getTextLength()) + speakerSizeDiff;
+			
+			try {
+				//write everything up to the length of the block start
+				fw.write(fullFileBytes, originalFileIndex, oldBlockHeaderStart - originalFileIndex);
+				
+				//write the rest of the block + text header
+				fw.write(newBlockLength);
+				fw.write(HEADERCHUNK);
+				fw.write(newStringLength);
+				fw.write(0x00);
+				
+				originalFileIndex += (oldBlockHeaderStart - originalFileIndex) + 5;
+				
+				//at this point, file should be at textStart
+				fw.write(newStringBytes);
+				
+				originalFileIndex += block.getTextLength();
+				
+				if(block.hasSpeaker()) {
+					//speaker header
+					fw.write(fullFileBytes, originalFileIndex, block.getSpeakerStart() - originalFileIndex + SPEAKEROFFSET);	
+					fw.write(newSpeakerBytes.length);
+					fw.write(newSpeakerBytes);
+					
+					originalFileIndex += (block.getSpeakerStart() - originalFileIndex) + block.getSpeakerLength();
+				}
+			}
+			catch (IOException e) {
+				//
+			}
+		}
+		
+		try {
+			if(originalFileIndex < fullFileBytes.length) {
+				fw.write(fullFileBytes, originalFileIndex, fullFileBytes.length - originalFileIndex);
+			}
+			fw.close();
+		}
+		catch (IOException e) {
+			//
+		}
+		
+		reloadFile(scriptMap.get(currentScript));
 	}
 	
 	private void loadFile(File file) { //dump old list, load one file
@@ -337,10 +472,22 @@ public class MainWindow extends JFrame {
 		
 		for(File file: dir.listFiles(new BinFileFilter())) {
 			ScriptReader script = new ScriptReader(file);
-			scriptMap.put(script, file);
-			fileListModel.addElement(script);
+			if(script.getBlockList().size() > 0) {
+				scriptMap.put(script, file);
+				fileListModel.addElement(script);
+			}
 		}
 		fileList.setSelectedIndex(0);
+	}
+	
+	private void reloadFile(File file) {
+		int index = fileListModel.indexOf(currentScript);
+		ScriptReader script = new ScriptReader(file);
+		scriptMap.remove(currentScript);
+		scriptMap.put(script, file);
+		fileListModel.set(index, script);
+		fileList.setSelectedIndex(-1);
+		fileList.setSelectedIndex(index);
 	}
 	
 	private void addGB(Component comp, int x, int y) {
@@ -406,9 +553,11 @@ public class MainWindow extends JFrame {
 			}
 		}
 		
+		/*
 		public void setLabelVisibility(int label, boolean isVisible) {
 			labels.get(label).setVisible(isVisible);
 		}
+		*/
 	}
 	
 	public static class NoDeselectionModel extends DefaultListSelectionModel {
@@ -443,4 +592,20 @@ public class MainWindow extends JFrame {
 			return "Script files (.bin)";
 		}	
 	}
+	
+	/*
+	public static class MostlyAsciiCharsetEncoder extends CharsetEncoder {
+		public MostlyAsciiCharsetEncoder() {
+			super(StandardCharsets.US_ASCII, 1, 1);
+		}
+
+		@Override
+		protected CoderResult encodeLoop(CharBuffer arg0, ByteBuffer arg1) {
+			// TODO Auto-generated method stub
+			return null;
+		}
+		
+		
+	}
+	*/
 }
