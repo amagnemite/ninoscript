@@ -8,10 +8,6 @@ import java.awt.Insets;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.nio.CharBuffer;
-import java.nio.charset.CharsetEncoder;
-import java.nio.charset.CoderResult;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -42,6 +38,7 @@ import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentEvent.EventType;
 import javax.swing.event.DocumentListener;
 import javax.swing.filechooser.FileFilter;
+import javax.swing.text.BadLocationException;
 import javax.swing.text.Document;
 
 import ninoscript.ScriptReader.BlockData;
@@ -60,7 +57,7 @@ public class MainWindow extends JFrame {
 	JMenuBar menuBar = new JMenuBar();
 	JMenu optionsMenu = new JMenu("Options");
 	JMenuItem loadFiles = new JMenuItem("Load");
-	JButton saveButton = new JButton("Save changes");
+	JButton saveFileButton = new JButton("Save changes to file");
 	
 	DefaultListModel<ScriptReader> fileListModel = new DefaultListModel<ScriptReader>();
 	SpinnerNumberModel blockSpinnerModel = new SpinnerNumberModel(0, 0, null, 1);
@@ -81,14 +78,10 @@ public class MainWindow extends JFrame {
 	private boolean setText = true;
 	
 	private Map<ScriptReader, File> scriptMap = new HashMap<ScriptReader, File>();
-	private ScriptReader currentScript;
+	private ScriptReader currentScript = null;
 	private BlockData currentBlock;
-	private List<Integer> textLengths = new ArrayList<Integer>();
-	private List<Integer> speakerLengths = new ArrayList<Integer>();
-	private List<Integer> newTextStarts = new ArrayList<Integer>();
-	private List<Integer> newSpeakerStarts = new ArrayList<Integer>();
-	private List<byte[]> originalBlocks;
-	private List<byte[]> newBytes = new ArrayList<byte[]>();
+	private String currentString;
+	//private List<String> substringList = new ArrayList<String>();
 	private int[] newLineLocs = {-1, -1, -1, -1, -1, -1};
 	
 	private GridBagConstraints gbcon = new GridBagConstraints();
@@ -106,6 +99,7 @@ public class MainWindow extends JFrame {
 		fileList.setSelectionModel(new NoDeselectionModel());
 		
 		originalText.setEditable(false);
+		originalText.setOpaque(false);
 		originalSpeakerField.setEditable(false);
 		
 		originalText.setMinimumSize(originalText.getPreferredSize());
@@ -117,14 +111,23 @@ public class MainWindow extends JFrame {
 		newText.setFont(getFont());
 		
 		JPanel blockPanel = new JPanel();
-		blockPanel.add(new JLabel("Block number:"));
-		blockPanel.add(blockSpinner);
-		blockPanel.add(blockMaxLabel);
-		//blockSpinner.setPreferredSize(new Dimension(blockSpinner.getPreferredSize().width + 10, blockSpinner.getPreferredSize().height));
+		blockPanel.setLayout(new GridBagLayout());
+		GridBagConstraints c = new GridBagConstraints();
+		c.insets = new Insets(0, 5, 0, 5);
+		c.gridy = 0;
+		c.gridx = 0;
+		blockPanel.add(new JLabel("Block number:"), c);
+		c.insets = new Insets(0, 0, 0, 5);
+		c.gridx = 1;
+		c.ipadx = 10;
+		blockPanel.add(blockSpinner, c);
+		c.gridx = 2;
+		c.ipadx = 5;
+		blockPanel.add(blockMaxLabel, c);
 		
 		JPanel originalTextPanel = new JPanel();
 		originalTextPanel.setLayout(new GridBagLayout());
-		GridBagConstraints c = new GridBagConstraints();
+		c = new GridBagConstraints();
 		originalTextPanel.setBorder(BorderFactory.createTitledBorder("Original text"));
 		//originalTextPanel.setBackground(Color.WHITE);
 
@@ -177,7 +180,7 @@ public class MainWindow extends JFrame {
 		addGB(originalTextPanel, 1, 1);
 		addGB(newTextPanel, 1, 2);
 			
-		addGB(saveButton, 1, 3);
+		addGB(saveFileButton, 1, 3);
 		
 		gbcon.anchor = GridBagConstraints.NORTHWEST;
 		addGB(originalSpeakerPanel, 2, 1);
@@ -187,7 +190,6 @@ public class MainWindow extends JFrame {
 		originalText.setPreferredSize(getSize());
 		newText.setPreferredSize(getSize());
 		
-		//setSize(getPreferredSize());
 		setVisible(true);
 		setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
 	}
@@ -224,16 +226,22 @@ public class MainWindow extends JFrame {
 			int index = fileList.getSelectedIndex();
 			
 			if(index != -1) {
+				if(currentScript != null) {
+					for(BlockData block : currentScript.getBlockList()) {
+						//wipes any new stuff that wasn't saved to file
+						block.setNewTextString(block.getTextString());
+						block.setNewSpeakerString(block.getSpeakerString());
+					}
+				}
+				
 				currentScript = fileList.getSelectedValue();
 				
 				/*
 				textLengths.clear();
 				speakerLengths.clear();
-				originalBlocks.clear();
 				for(BlockData data : currentScript.getBlockList()) {
 					textLengths.add(data.getTextLength());
 					speakerLengths.add(data.getSpeakerLength());
-					originalBlocks.add(data.getTextBytes());
 				}	
 				*/
 				
@@ -244,14 +252,15 @@ public class MainWindow extends JFrame {
 				blockMaxLabel.setText("of " + (currentScript.getBlockList().size() - 1));
 			}
 			else {
-				//clear components
+				clearComponents();
 			}	
 		});
 		
 		blockSpinner.addChangeListener(event -> {
 			if(currentScript == null || currentScript.getBlockList().size() == 0) {
+				clearComponents();
+				originalText.setText("no text");
 				return;
-				//clear components
 			}
 			
 			if(setText) {
@@ -260,6 +269,25 @@ public class MainWindow extends JFrame {
 			currentBlock = currentScript.getBlockList().get((int) blockSpinner.getValue());
 			
 			updateTextComponents();
+			currentString = newText.getText();
+			
+			String[] splits = currentString.split("\n");
+			int i = 0;
+			int loc = 0;
+			while(i < splits.length) {
+				originalLengths.setLabelText(i, splits[i].length());
+				newLengths.setLabelText(i, splits[i].length());
+				
+				newLineLocs[i] = loc + splits[i].length() + 1;
+				loc += newLineLocs[i];
+				i++;
+			}
+			while(i < 6) {
+				originalLengths.setLabelText(i, -1);
+				newLengths.setLabelText(i, -1);
+				newLineLocs[i] = -1;
+				i++;
+			}
 		});
 		
 		newText.getDocument().addDocumentListener(new DocumentListener() {
@@ -268,42 +296,68 @@ public class MainWindow extends JFrame {
 			}
 
 			public void insertUpdate(DocumentEvent e) {
-				
+				update(e);
 			}
 
 			public void removeUpdate(DocumentEvent e) {
-				
+				update(e);
 			}
 			
 			public void update(DocumentEvent e) {
-				Document doc = e.getDocument();
-				int changeLength = e.getLength();
-				int arrayIndex = 0;
-				int offset = e.getOffset();
-				EventType type = e.getType();
+				if(!setText) {
+					return;
+				}
 				
-				e.getChange(null);
+				Document doc = e.getDocument();
+				EventType type = e.getType();
+				int changeLength = e.getLength();
+				
+				int offset = e.getOffset();
+				int lineChanged = 0;
+				
+				//System.out.println(type + " length " + changeLength + " offset " + offset);
 				
 				for(int i = 0; i < 6; i++) {
-					int newLinePos = newLineLocs[i];
-					if(offset > newLinePos) {
+					//int newLinePos = newLineLocs[i];
+					if(offset > newLineLocs[i]) {
 						continue;
 					}
 					
-					arrayIndex = i;
+					lineChanged = i;
 					break;
 				}
 			
 				if(type == EventType.INSERT) {
-					
+					try {
+						//System.out.println("added " + doc.getText(offset, 1).getBytes()[0]);
+						if(doc.getText(offset, 1).equals("\n")) {
+							splitString();
+						}
+						else {
+							newLengths.setLabelText(lineChanged, newLengths.getLabelText(lineChanged) + 1);
+							newLineLocs[lineChanged]++;
+						}
+					}
+					catch (BadLocationException b) {
+							
+					}
+					currentString = newText.getText();
 				}
 				else if(type == EventType.REMOVE) {
-					//if()
+					//System.out.println("removed " + currentString.substring(offset, offset + 1).getBytes()[0]);
+					if(currentString.substring(offset, offset + 1).getBytes()[0] == 0x0A) { //a newline was deleted
+						splitString();
+					}
+					else {
+						newLengths.setLabelText(lineChanged, newLengths.getLabelText(lineChanged) - 1);
+						newLineLocs[lineChanged]--;
+					}
+					currentString = newText.getText();
 				}
 			}
 		});
 		
-		saveButton.addActionListener(event -> {
+		saveFileButton.addActionListener(event -> {
 			writeFile();
 		});
 	}
@@ -320,23 +374,59 @@ public class MainWindow extends JFrame {
 			originalSpeakerField.setText("");
 			newSpeakerField.setText("");
 		}
-		
-		String[] splits = currentBlock.getTextString().split("\n");
+	}
+	
+	private void splitString() {
+		String[] splits = new String[6];
+		String text = newText.getText();
 		int i = 0;
+		int index = 0;
 		int loc = 0;
-		while(i < splits.length) {
-			originalLengths.setLabelText(i, splits[i].length());
-			newLengths.setLabelText(i, splits[i].length());
-			newLineLocs[i] = loc + splits[i].length() + 1;
-			loc += newLineLocs[i];
-			i++;
+		
+		while(i != -1) {
+			int oldI = i;
+			i = oldI != 0 ? i + 1 : i;
+			i = text.indexOf('\n', i);
+			
+			if(i == -1) { //no more newlines
+				if(oldI + 1 >= text.length()) {
+					splits[index] = "";
+				}
+				else {
+					splits[index] = text.substring(oldI + 1);
+				}
+				newLineLocs[index] = oldI + 1;
+			}
+			else {
+				if(text.substring(oldI, i).equals("\n")) {
+					splits[index] = "";
+				}
+				else {
+					splits[index] = text.substring(oldI, i);
+				}
+				newLineLocs[index] = i;
+			}
+			
+			//loc += newLineLocs[index];
+			originalLengths.setLabelText(index, splits[index].length());
+			newLengths.setLabelText(index, splits[index].length());
+			index++;
 		}
-		while(i < 6) {
-			originalLengths.setLabelText(i, -1);
-			newLengths.setLabelText(i, -1);
-			newLineLocs[i] = -1;
-			i++;
+		while(index < 6) {
+			originalLengths.setLabelText(index, -1);
+			newLengths.setLabelText(index, -1);
+			newLineLocs[index] = -1;
+			index++;
 		}
+	}
+	
+	private void clearComponents() {
+		originalText.setText("");
+		newText.setText("");
+		originalSpeakerField.setText("");
+		newSpeakerField.setText("");
+		blockSpinner.setValue(0);
+		blockMaxLabel.setText("of 0");
 	}
 	
 	private void saveText() {
@@ -511,14 +601,6 @@ public class MainWindow extends JFrame {
 			setLayout(new GridBagLayout());
 			GridBagConstraints c = new GridBagConstraints();
 			setOpaque(false);
-			/*
-			add(lengthLabel1);
-			add(lengthLabel2);
-			add(lengthLabel3);
-			add(lengthLabel4);
-			add(lengthLabel5);
-			add(lengthLabel6);
-			*/
 			
 			c.anchor = GridBagConstraints.BASELINE;
 			
@@ -551,6 +633,10 @@ public class MainWindow extends JFrame {
 			else {
 				labels.get(label).setText(Integer.toString(content));
 			}
+		}
+		
+		public int getLabelText(int label) {
+			return Integer.valueOf(labels.get(label).getText());
 		}
 		
 		/*
