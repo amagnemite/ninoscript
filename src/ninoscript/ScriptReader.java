@@ -4,7 +4,6 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -17,6 +16,7 @@ public class ScriptReader {
 	//private static final byte DASH = 0x2D;
 	//private static final byte SPACE = 0x20;
 	
+	private String fileName;
 	private byte[] fullFileBytes;
 	private String scriptName;
 	private List<BlockData> blockList = new ArrayList<BlockData>();
@@ -40,6 +40,7 @@ public class ScriptReader {
 			return;
 		}
 		
+		fileName = file.getName();
 		int scriptNameLength = fullFileBytes[SCRIPTNAMEINDEX] & 0xFF;
 		byte[] nameBytes = new byte[scriptNameLength];
 		for(int i = 1; i <= scriptNameLength; i++) {
@@ -84,7 +85,7 @@ public class ScriptReader {
 						continue;
 					}
 					
-					BlockData data = parseBlock(fullFileBytes, i);
+					BlockData data = parseBlock(fullFileBytes, i, file.getName());
 					if(data != null) {
 						blockList.add(data);
 						i += data.getFullBlockLength();
@@ -96,8 +97,8 @@ public class ScriptReader {
 		}
 		//System.out.println(blockList.size());
 	}
-	
-	private BlockData parseBlock(byte[] fullFileBytes, int start) {
+
+	private BlockData parseBlock(byte[] fullFileBytes, int start, String filename) {
 		int shift = start; //starts at the 05 loc
 		byte[] textBytes;
 		byte[] speakerBytes = null;
@@ -205,7 +206,7 @@ public class ScriptReader {
 	}
 	
 	public String toString() {
-		return scriptName;
+		return scriptName + " (" + fileName + ")";
 	}
 	
 	public List<BlockData> getBlockList() {
@@ -214,6 +215,10 @@ public class ScriptReader {
 	
 	public byte[] getFullFileBytes() {
 		return fullFileBytes;
+	}
+	
+	public String getFileName() {
+		return fileName;
 	}
 	
 	public static class BlockData {
@@ -239,7 +244,7 @@ public class ScriptReader {
 			this.speakerStart = speakerStart;
 			this.textBytes = textBytes;
 			this.speakerBytes = speakerBytes;
-
+			
 			String unicodeText = new String();
 			
 			byte[] sorted = Arrays.copyOf(textBytes, textBytes.length);

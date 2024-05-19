@@ -6,6 +6,7 @@ import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
 import java.io.File;
+import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -65,9 +66,9 @@ public class MainWindow extends JFrame {
 	
 	JList<ScriptReader> fileList = new JList<ScriptReader>(fileListModel);
 	JSpinner blockSpinner = new JSpinner(blockSpinnerModel);
-	JTextArea originalText = new JTextArea(6, 30);
+	JTextArea originalText = new JTextArea(6, 35);
 	JList<Integer> originalTextLenLists = new JList<Integer>();
-	JTextArea newText = new JTextArea(6, 30);
+	JTextArea newText = new JTextArea(6, 35);
 	JList<Integer> newTextLenLists = new JList<Integer>();
 	JTextField originalSpeakerField = new JTextField(10);
 	JTextField newSpeakerField = new JTextField(10);
@@ -233,7 +234,7 @@ public class MainWindow extends JFrame {
 						block.setNewSpeakerString(block.getSpeakerString());
 					}
 				}
-				
+			
 				currentScript = fileList.getSelectedValue();
 				
 				/*
@@ -257,12 +258,6 @@ public class MainWindow extends JFrame {
 		});
 		
 		blockSpinner.addChangeListener(event -> {
-			if(currentScript == null || currentScript.getBlockList().size() == 0) {
-				clearComponents();
-				originalText.setText("no text");
-				return;
-			}
-			
 			if(setText) {
 				saveText();
 			}
@@ -271,11 +266,22 @@ public class MainWindow extends JFrame {
 			updateTextComponents();
 			currentString = newText.getText();
 			
-			String[] splits = currentString.split("\n");
+			String[] splits = currentBlock.getTextString().split("\n");
 			int i = 0;
+			while(i < MAXLINES) {
+				if(i < splits.length) {
+					originalLengths.setLabelText(i, splits[i].length());
+				}
+				else {
+					originalLengths.setLabelText(i, -1);
+				}
+				i++;
+			}
+			
+			splits = currentString.split("\n");
+			i = 0;
 			int loc = 0;
 			while(i < splits.length) {
-				originalLengths.setLabelText(i, splits[i].length());
 				newLengths.setLabelText(i, splits[i].length());
 				
 				newLineLocs[i] = loc + splits[i].length() + 1;
@@ -283,7 +289,6 @@ public class MainWindow extends JFrame {
 				i++;
 			}
 			while(i < 6) {
-				originalLengths.setLabelText(i, -1);
 				newLengths.setLabelText(i, -1);
 				newLineLocs[i] = -1;
 				i++;
@@ -316,6 +321,11 @@ public class MainWindow extends JFrame {
 				int lineChanged = 0;
 				
 				//System.out.println(type + " length " + changeLength + " offset " + offset);
+				if(changeLength > 1) {
+					//if a large paste or delete happens, just resplit 
+					splitString();
+					return;
+				}
 				
 				for(int i = 0; i < 6; i++) {
 					//int newLinePos = newLineLocs[i];
@@ -329,11 +339,12 @@ public class MainWindow extends JFrame {
 			
 				if(type == EventType.INSERT) {
 					try {
-						//System.out.println("added " + doc.getText(offset, 1).getBytes()[0]);
 						if(doc.getText(offset, 1).equals("\n")) {
 							splitString();
 						}
 						else {
+							//System.out.println(lineChanged);
+							//System.out.println(newLineLocs[lineChanged]);
 							newLengths.setLabelText(lineChanged, newLengths.getLabelText(lineChanged) + 1);
 							newLineLocs[lineChanged]++;
 						}
@@ -381,7 +392,6 @@ public class MainWindow extends JFrame {
 		String text = newText.getText();
 		int i = 0;
 		int index = 0;
-		int loc = 0;
 		
 		while(i != -1) {
 			int oldI = i;
@@ -395,7 +405,7 @@ public class MainWindow extends JFrame {
 				else {
 					splits[index] = text.substring(oldI + 1);
 				}
-				newLineLocs[index] = oldI + 1;
+				newLineLocs[index] = oldI + 1 + splits[index].length();
 			}
 			else {
 				if(text.substring(oldI, i).equals("\n")) {
@@ -407,13 +417,10 @@ public class MainWindow extends JFrame {
 				newLineLocs[index] = i;
 			}
 			
-			//loc += newLineLocs[index];
-			originalLengths.setLabelText(index, splits[index].length());
 			newLengths.setLabelText(index, splits[index].length());
 			index++;
 		}
 		while(index < 6) {
-			originalLengths.setLabelText(index, -1);
 			newLengths.setLabelText(index, -1);
 			newLineLocs[index] = -1;
 			index++;
@@ -448,7 +455,7 @@ public class MainWindow extends JFrame {
 		
 		try {
 			fw = new FileOutputStream(scriptMap.get(currentScript));
-		} catch (IOException e) {
+		} catch (FileNotFoundException e) {
 			return;
 		}
 		
@@ -487,6 +494,7 @@ public class MainWindow extends JFrame {
 				else {
 					//it goes down here for the other two ellipses bytes
 					//if there's any fullwidths with sub 7F, loop needs to change
+					//System.out.println(unsignedB);
 					if(unsignedB == 0xE2) { //TODO: update this if any other fullwidths get added
 						buffer[newStringLength] = FULLWIDTHMARKER;
 						buffer[newStringLength + 1] = ELLIPSE;
