@@ -9,6 +9,8 @@ import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.UnsupportedEncodingException;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -43,17 +45,11 @@ import javax.swing.text.BadLocationException;
 import javax.swing.text.Document;
 
 import ninoscript.ScriptReader.BlockData;
+import ninoscript.ScriptReader.ConversationData;
 
 @SuppressWarnings("serial")
 public class MainWindow extends JFrame {
-	public static final byte FULLWIDTHMARKER = Integer.valueOf(0x81).byteValue();
-	public static final byte ELLIPSE = Integer.valueOf(0x63).byteValue();
-	public static final byte OPENAPOSTROPHE = Integer.valueOf(0x67).byteValue();
-	public static final byte CLOSEAPOSTROPHE = Integer.valueOf(0x68).byteValue();
 	private static final int MAXLINES = 6;
-	
-	public static final String ELLIPSESTRING = "…";
-	private static final byte APOSTROPHE = 0x22;
 	
 	JMenuBar menuBar = new JMenuBar();
 	JMenu optionsMenu = new JMenu("Options");
@@ -450,95 +446,111 @@ public class MainWindow extends JFrame {
 		final int BLOCKOFFSET = -5; //five back from text start
 		final int SPEAKEROFFSET = -1; //one back from speaker start
 		final byte[] HEADERCHUNK = {0x00, 0x01};
+		final byte[] CONVERSATIONMARKER = {0x0A, 0x09, 0x19, 0x00};
+		int firstBlock = 0;
 		
 		saveText();
 		
 		try {
 			fw = new FileOutputStream(scriptMap.get(currentScript));
-		} catch (FileNotFoundException e) {
+		}
+		catch (FileNotFoundException e) {
 			return;
 		}
 		
-		for(BlockData block: currentScript.getBlockList()) {
-			byte[] unparsedStringBytes = block.getNewTextString().getBytes(StandardCharsets.UTF_8);
-			byte[] newSpeakerBytes = block.getSpeakerString() != null ? block.getNewSpeakerString().getBytes(StandardCharsets.UTF_8) : null;
-			byte[] buffer = new byte[unparsedStringBytes.length * 3];
-			int newStringLength = 0;
-			byte[] newStringBytes;
-			boolean openApostrophe = false;
-			int newBlockLength = 0;
-			int oldBlockHeaderStart = block.getTextStart() + BLOCKOFFSET;
-			int speakerSizeDiff = 0;
+		for(ConversationData convo : currentScript.getConvoList()) {
+			int lastBlock = convo.getLastBlock();
+			int newConvoSize = 0;
+			int oldTotalBlocksSize = 0;
+			int newTotalBlocksSize = 0;
+			Map<BlockData, byte[]> blockMap = new HashMap<BlockData, byte[]>();
 			
-			for(int i = 0; i < unparsedStringBytes.length; i++) {
-				byte b = unparsedStringBytes[i];
-				int unsignedB = Byte.toUnsignedInt(b);
-				if(unsignedB < 0x7F) {
-					if(unsignedB == APOSTROPHE) { //replace apostrophes with the fullwidth open/close
-						buffer[newStringLength] = FULLWIDTHMARKER;
-						newStringLength++;
-						if(!openApostrophe) {
-							buffer[newStringLength] = OPENAPOSTROPHE;
-						}
-						else {
-							buffer[newStringLength] = CLOSEAPOSTROPHE;
-						}
-						openApostrophe = !openApostrophe;
-						newStringLength++;
-					}
-					else {
-						buffer[newStringLength] = b;
-						newStringLength++;
-					}
+			//first loop to get the new convo size
+			for(int j = firstBlock; j < lastBlock + 1; j++) {
+				BlockData block = currentScript.getBlockList().get(j);
+				oldTotalBlocksSize += block.getFullBlockLength();
+				
+				byte[] newStringBytes = null;
+				try {
+					newStringBytes = block.getNewTextString().getBytes("Shift-JIS");
 				}
-				else {
-					//it goes down here for the other two ellipses bytes
-					//if there's any fullwidths with sub 7F, loop needs to change
-					//System.out.println(unsignedB);
-					if(unsignedB == 0xE2) { //TODO: update this if any other fullwidths get added
-						buffer[newStringLength] = FULLWIDTHMARKER;
-						buffer[newStringLength + 1] = ELLIPSE;
-						newStringLength += 2;
-					}
+				catch (UnsupportedEncodingException e) {
 				}
-			}
-			newStringBytes = Arrays.copyOf(buffer, newStringLength);
-			
-			if(block.hasSpeaker()) {
-				speakerSizeDiff = newSpeakerBytes.length - block.getSpeakerLength();
-			}
-			
-			newBlockLength = block.getFullBlockLength() + (newStringLength - block.getTextLength()) + speakerSizeDiff;
-			
-			try {
-				//write everything up to the length of the block start
-				fw.write(fullFileBytes, originalFileIndex, oldBlockHeaderStart - originalFileIndex);
-				
-				//write the rest of the block + text header
-				fw.write(newBlockLength);
-				fw.write(HEADERCHUNK);
-				fw.write(newStringLength);
-				fw.write(0x00);
-				
-				originalFileIndex += (oldBlockHeaderStart - originalFileIndex) + 5;
-				
-				//at this point, file should be at textStart
-				fw.write(newStringBytes);
-				
-				originalFileIndex += block.getTextLength();
+				byte[] newSpeakerBytes = block.getSpeakerString() != null ? block.getNewSpeakerString().getBytes(StandardCharsets.UTF_8) : null;
+				int speakerSizeDiff = 0;
 				
 				if(block.hasSpeaker()) {
-					//speaker header
-					fw.write(fullFileBytes, originalFileIndex, block.getSpeakerStart() - originalFileIndex + SPEAKEROFFSET);	
-					fw.write(newSpeakerBytes.length);
-					fw.write(newSpeakerBytes);
-					
-					originalFileIndex += (block.getSpeakerStart() - originalFileIndex) + block.getSpeakerLength();
+					speakerSizeDiff = newSpeakerBytes.length - block.getSpeakerLength();
 				}
+				
+				newTotalBlocksSize += block.getFullBlockLength() + (newStringBytes.length - block.getTextLength()) + speakerSizeDiff;
+				blockMap.put(block, newStringBytes);
+			}
+			newConvoSize = (convo.getLength() - oldTotalBlocksSize) + newTotalBlocksSize;
+			
+			try {
+				//write everything up to the index of length of the convo start
+				fw.write(fullFileBytes, originalFileIndex, convo.getStart() - originalFileIndex);
+				
+				//write gets upset if >255 and need to pad 00s anyway
+				byte[] lengthBytes = ByteBuffer.allocate(4).putInt(newConvoSize).array();
+				fw.write(lengthBytes[3]);
+				fw.write(lengthBytes[2]);
+				fw.write(lengthBytes[1]);
+				fw.write(lengthBytes[0]);
+				
+				fw.write(CONVERSATIONMARKER);
+				
+				originalFileIndex += (convo.getStart() - originalFileIndex) + 8;
 			}
 			catch (IOException e) {
-				//
 			}
+			
+			for(int j = firstBlock; j < lastBlock + 1; j++) {
+				BlockData block = currentScript.getBlockList().get(j);
+				byte[] stringBytes = blockMap.get(block);
+				
+				byte[] newSpeakerBytes = block.getSpeakerString() != null ? block.getNewSpeakerString().getBytes(StandardCharsets.UTF_8) : null;
+				int oldBlockHeaderStart = block.getTextStart() + BLOCKOFFSET;
+				int newBlockLength = 0;
+				int speakerSizeDiff = 0;
+				
+				if(block.hasSpeaker()) {
+					speakerSizeDiff = newSpeakerBytes.length - block.getSpeakerLength();
+				}
+				newBlockLength = block.getFullBlockLength() + (stringBytes.length - block.getTextLength()) + speakerSizeDiff;
+				
+				try {
+					//write everything up to this block
+					fw.write(fullFileBytes, originalFileIndex, oldBlockHeaderStart - originalFileIndex);
+					
+					//write the rest of the block + text header
+					fw.write(newBlockLength);
+					fw.write(HEADERCHUNK);
+					fw.write(stringBytes.length);
+					fw.write(0x00);
+				
+					originalFileIndex += (oldBlockHeaderStart - originalFileIndex) + 6;
+					
+					//at this point, file should be at textStart
+					fw.write(stringBytes);
+					originalFileIndex += block.getTextLength();
+					
+					if(block.hasSpeaker()) {
+						//speaker header
+						fw.write(fullFileBytes, originalFileIndex, block.getSpeakerStart() - originalFileIndex + SPEAKEROFFSET);	
+						
+						fw.write(newSpeakerBytes.length);
+						fw.write(newSpeakerBytes);
+						
+						originalFileIndex += (block.getSpeakerStart() - originalFileIndex) + block.getSpeakerLength();
+					}
+				}
+				catch (IOException e) {
+					//
+				}
+			}
+			firstBlock = convo.getLastBlock() + 1;
 		}
 		
 		try {
@@ -646,12 +658,6 @@ public class MainWindow extends JFrame {
 		public int getLabelText(int label) {
 			return Integer.valueOf(labels.get(label).getText());
 		}
-		
-		/*
-		public void setLabelVisibility(int label, boolean isVisible) {
-			labels.get(label).setVisible(isVisible);
-		}
-		*/
 	}
 	
 	public static class NoDeselectionModel extends DefaultListSelectionModel {
@@ -686,20 +692,4 @@ public class MainWindow extends JFrame {
 			return "Script files (.bin)";
 		}	
 	}
-	
-	/*
-	public static class MostlyAsciiCharsetEncoder extends CharsetEncoder {
-		public MostlyAsciiCharsetEncoder() {
-			super(StandardCharsets.US_ASCII, 1, 1);
-		}
-
-		@Override
-		protected CoderResult encodeLoop(CharBuffer arg0, ByteBuffer arg1) {
-			// TODO Auto-generated method stub
-			return null;
-		}
-		
-		
-	}
-	*/
 }

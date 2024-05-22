@@ -4,8 +4,9 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.io.UnsupportedEncodingException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 
 public class ScriptReader {
@@ -19,6 +20,7 @@ public class ScriptReader {
 	private String fileName;
 	private byte[] fullFileBytes;
 	private String scriptName;
+	private List<ConversationData> convoList = new ArrayList<ConversationData>();
 	private List<BlockData> blockList = new ArrayList<BlockData>();
 	
 	public ScriptReader(File file) {
@@ -43,6 +45,9 @@ public class ScriptReader {
 		fileName = file.getName();
 		int scriptNameLength = fullFileBytes[SCRIPTNAMEINDEX] & 0xFF;
 		byte[] nameBytes = new byte[scriptNameLength];
+		int previousBlockCount = 0;
+		int lastBlockOfConv = 0;
+		boolean firstConvo = true;
 		for(int i = 1; i <= scriptNameLength; i++) {
 			nameBytes[i - 1] = fullFileBytes[SCRIPTNAMEINDEX + i];
 		}
@@ -55,6 +60,29 @@ public class ScriptReader {
 			switch(b) {
 				case 0x00:
 					continue;
+				case 0x0A:
+					//these come after conversation lengths
+					if(fullFileBytes[i + 1] == 0x09 && fullFileBytes[i + 2] == 0x19 && fullFileBytes[i + 3] == 0x00) {
+						int conversationLength = fullFileBytes[i - 4] & 0xFF | (fullFileBytes[i - 3] & 0xFF) << 8 |
+							(fullFileBytes[i - 2] & 0xFF) << 16 | (fullFileBytes[i - 1] & 0xFF) << 24;
+						
+						if(!firstConvo) {
+							//not the first convo block
+							if(previousBlockCount == lastBlockOfConv) {
+								convoList.remove(convoList.size() - 1); //if no blocks, remove the last convo added
+							}
+							else {
+								convoList.get(convoList.size() - 1).setLastBlock(lastBlockOfConv - 1);
+								previousBlockCount = lastBlockOfConv;
+							}
+						}
+						else {
+							firstConvo = false;
+						}
+						
+						convoList.add(new ConversationData(i - 4, conversationLength, 0));
+					}
+					break;
 				case 0x05:
 					//it seems that the max block length should be 255 bytes?
 					//longest so far is 210
@@ -90,10 +118,14 @@ public class ScriptReader {
 						blockList.add(data);
 						i += data.getFullBlockLength();
 					}
+					lastBlockOfConv++;
 					break;
 				default:
 					break;
 			}
+		}
+		if(previousBlockCount != lastBlockOfConv) {
+			convoList.get(convoList.size() - 1).setLastBlock(lastBlockOfConv - 1);
 		}
 		//System.out.println(blockList.size());
 	}
@@ -221,11 +253,51 @@ public class ScriptReader {
 		return fileName;
 	}
 	
+	public List<ConversationData> getConvoList() {
+		return convoList;
+	}
+	
+	public static class ConversationData {
+		private int start; //this is the index of the length, 4b before 0A 09 19 00
+		private int length;
+		private int lastBlock;
+		
+		public ConversationData(int start, int length, int lastBlock) {
+			this.start = start;
+			this.length = length;
+			this.lastBlock = lastBlock;
+		}
+
+		public int getStart() {
+			return start;
+		}
+
+		public void setStart(int start) {
+			this.start = start;
+		}
+
+		public int getLength() {
+			return length;
+		}
+
+		public void setLength(int length) {
+			this.length = length;
+		}
+
+		public int getLastBlock() {
+			return lastBlock;
+		}
+
+		public void setLastBlock(int lastBlock) {
+			this.lastBlock = lastBlock;
+		}
+	}
+	
 	public static class BlockData {
 		private int fullBlockLength;
-		private int textLength;
 		private int textStart;
-		private int speakerStart;
+		private int textLength;
+		private int speakerStart; //actual start of the text, so -1 for length
 		private int speakerLength;
 		
 		private byte[] textBytes;
@@ -245,51 +317,14 @@ public class ScriptReader {
 			this.textBytes = textBytes;
 			this.speakerBytes = speakerBytes;
 			
-			String unicodeText = new String();
-			
-			byte[] sorted = Arrays.copyOf(textBytes, textBytes.length);
-			Arrays.sort(sorted);
-			if(Arrays.binarySearch(sorted, MainWindow.FULLWIDTHMARKER) > -1) {
-				//only iterate through the array if there's a fullwidth char
-				int i = 0;
-				byte[] buffer = new byte[textBytes.length];
-				int bufferIndex = 0;
-				
-				while(i < textBytes.length) {
-					byte b = textBytes[i];
-					if(b == MainWindow.FULLWIDTHMARKER) {
-						byte nextChar = textBytes[i+1];
-						String equivalent = null;
-						if(nextChar == MainWindow.ELLIPSE) {
-							equivalent = MainWindow.ELLIPSESTRING;
-						}
-						else if(nextChar == MainWindow.OPENAPOSTROPHE || nextChar == MainWindow.CLOSEAPOSTROPHE) {
-							equivalent = "\"";
-						}
-						
-						unicodeText = unicodeText + new String(Arrays.copyOf(buffer, bufferIndex)) + equivalent;
-						buffer = new byte[textBytes.length];
-						i += 2;
-						bufferIndex = 0;
-					}
-					else {
-						buffer[bufferIndex] = textBytes[i];
-						i++;
-						bufferIndex++;
-					}
-				}
-				
-				if(bufferIndex > 0) {
-					unicodeText = unicodeText + new String(Arrays.copyOf(buffer, bufferIndex));
-				}
-				textString = unicodeText;
+			try {
+				textString = new String(textBytes, "Shift_JIS");
 			}
-			else {
-				textString = new String(textBytes);
+			catch (UnsupportedEncodingException e) {
 			}
 			
 			if(speakerBytes != null) {
-				speakerString = new String(speakerBytes);
+				speakerString = new String(speakerBytes, StandardCharsets.UTF_8);
 			}
 			
 			newTextString = textString;
