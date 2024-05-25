@@ -11,7 +11,6 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.nio.ByteBuffer;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -46,6 +45,7 @@ import javax.swing.text.Document;
 
 import ninoscript.ScriptReader.BlockData;
 import ninoscript.ScriptReader.ConversationData;
+import ninoscript.ScriptReader.Magic;
 
 @SuppressWarnings("serial")
 public class MainWindow extends JFrame {
@@ -376,10 +376,17 @@ public class MainWindow extends JFrame {
 		if(currentBlock.getSpeakerString() != null) {
 			originalSpeakerField.setText(currentBlock.getSpeakerString());
 			newSpeakerField.setText(currentBlock.getNewSpeakerString());
+			newSpeakerField.setEnabled(true);
 		}
 		else {
 			originalSpeakerField.setText("");
 			newSpeakerField.setText("");
+			if(currentBlock.getMagic() == Magic.NONDIALOGUE) {
+				newSpeakerField.setEnabled(false);
+			}
+			else {
+				newSpeakerField.setEnabled(true);
+			}
 		}
 	}
 	
@@ -443,9 +450,7 @@ public class MainWindow extends JFrame {
 		FileOutputStream fw = null;
 		int originalFileIndex = 0;
 		byte[] fullFileBytes = currentScript.getFullFileBytes();
-		final int BLOCKOFFSET = -5; //five back from text start
-		final int SPEAKEROFFSET = -1; //one back from speaker start
-		final byte[] HEADERCHUNK = {0x00, 0x01};
+		final int SPEAKERLENGTHOFFSET = -1; //one back from speaker start
 		final byte[] CONVERSATIONMARKER = {0x0A, 0x09, 0x19, 0x00};
 		int firstBlock = 0;
 		
@@ -464,23 +469,25 @@ public class MainWindow extends JFrame {
 			int oldTotalBlocksSize = 0;
 			int newTotalBlocksSize = 0;
 			Map<BlockData, byte[]> blockMap = new HashMap<BlockData, byte[]>();
+			Map<BlockData, byte[]> speakerMap = new HashMap<BlockData, byte[]>();
 			
 			//first loop to get the new convo size
 			for(int j = firstBlock; j < lastBlock + 1; j++) {
 				BlockData block = currentScript.getBlockList().get(j);
 				oldTotalBlocksSize += block.getFullBlockLength();
-				
+				int speakerSizeDiff = 0;
 				byte[] newStringBytes = null;
+				byte[] newSpeakerBytes = null;
 				try {
 					newStringBytes = block.getNewTextString().getBytes("Shift-JIS");
+					newSpeakerBytes = block.getSpeakerString() != null ? block.getNewSpeakerString().getBytes("Shift-JIS") : null;
 				}
 				catch (UnsupportedEncodingException e) {
 				}
-				byte[] newSpeakerBytes = block.getSpeakerString() != null ? block.getNewSpeakerString().getBytes(StandardCharsets.UTF_8) : null;
-				int speakerSizeDiff = 0;
 				
 				if(block.hasSpeaker()) {
 					speakerSizeDiff = newSpeakerBytes.length - block.getSpeakerLength();
+					speakerMap.put(block, newSpeakerBytes);
 				}
 				
 				newTotalBlocksSize += block.getFullBlockLength() + (newStringBytes.length - block.getTextLength()) + speakerSizeDiff;
@@ -509,9 +516,7 @@ public class MainWindow extends JFrame {
 			for(int j = firstBlock; j < lastBlock + 1; j++) {
 				BlockData block = currentScript.getBlockList().get(j);
 				byte[] stringBytes = blockMap.get(block);
-				
-				byte[] newSpeakerBytes = block.getSpeakerString() != null ? block.getNewSpeakerString().getBytes(StandardCharsets.UTF_8) : null;
-				int oldBlockHeaderStart = block.getTextStart() + BLOCKOFFSET;
+				byte[] newSpeakerBytes = block.getSpeakerString() != null ? speakerMap.get(block) : null;
 				int newBlockLength = 0;
 				int speakerSizeDiff = 0;
 				
@@ -522,15 +527,25 @@ public class MainWindow extends JFrame {
 				
 				try {
 					//write everything up to this block
-					fw.write(fullFileBytes, originalFileIndex, oldBlockHeaderStart - originalFileIndex);
+					fw.write(fullFileBytes, originalFileIndex, block.getBlockStart() - originalFileIndex);
+					int bytes = 0;
 					
 					//write the rest of the block + text header
+					fw.write(block.getMagic().getValue());
 					fw.write(newBlockLength);
-					fw.write(HEADERCHUNK);
-					fw.write(stringBytes.length);
 					fw.write(0x00);
+					fw.write(0x01);
+					fw.write(stringBytes.length);
+					
+					if(block.getMagic() == Magic.DIALOGUE) {
+						fw.write(0x00);
+						bytes = 6;
+					}
+					else {
+						bytes = 5;
+					}		
 				
-					originalFileIndex += (oldBlockHeaderStart - originalFileIndex) + 6;
+					originalFileIndex += (block.getBlockStart() - originalFileIndex) + bytes;
 					
 					//at this point, file should be at textStart
 					fw.write(stringBytes);
@@ -538,7 +553,7 @@ public class MainWindow extends JFrame {
 					
 					if(block.hasSpeaker()) {
 						//speaker header
-						fw.write(fullFileBytes, originalFileIndex, block.getSpeakerStart() - originalFileIndex + SPEAKEROFFSET);	
+						fw.write(fullFileBytes, originalFileIndex, (block.getSpeakerStart() - originalFileIndex) + SPEAKERLENGTHOFFSET);	
 						
 						fw.write(newSpeakerBytes.length);
 						fw.write(newSpeakerBytes);
@@ -573,6 +588,7 @@ public class MainWindow extends JFrame {
 		scriptMap.clear();
 		scriptMap.put(script, file);
 		fileListModel.addElement(script);
+		fileList.clearSelection();
 		fileList.setSelectedIndex(0);
 	}
 	
@@ -596,7 +612,7 @@ public class MainWindow extends JFrame {
 		scriptMap.remove(currentScript);
 		scriptMap.put(script, file);
 		fileListModel.set(index, script);
-		fileList.setSelectedIndex(-1);
+		fileList.clearSelection();
 		fileList.setSelectedIndex(index);
 	}
 	
