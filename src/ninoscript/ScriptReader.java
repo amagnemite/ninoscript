@@ -61,6 +61,7 @@ public class ScriptReader {
 		int previousBlockCount = 0;
 		int lastBlockOfConv = 0;
 		boolean firstConvo = true;
+		BlockData data;
 		for(int i = 1; i <= scriptNameLength; i++) {
 			nameBytes[i - 1] = fullFileBytes[SCRIPTNAMEINDEX + i];
 		}
@@ -130,16 +131,18 @@ public class ScriptReader {
 						continue;
 					}
 					
-					BlockData data = parseBlock(fullFileBytes, i);
-					if(data != null) {
-						blockList.add(data);
-						i += data.getFullBlockLength();
-					}
+					data = parseBlock(fullFileBytes, i);
+					blockList.add(data);
+					i += data.getFullBlockLength();
 					lastBlockOfConv++;
 					break;
 				case 0x26:
 					//non conversation text
 					//format of 26 [full length] 00 01 [text length]
+					if(fullFileBytes[i + 1] == 0x00) {
+						continue;
+					}
+					
 					if(fullFileBytes[i + 2] != 0x00) {
 						continue;
 					}
@@ -148,8 +151,17 @@ public class ScriptReader {
 						continue;
 					}
 					
-					blockList.add(parseNonDialogue(fullFileBytes, i));
-					lastBlockOfConv++;
+					if(fullFileBytes[i + 4] == 0x00) {
+						continue;
+					}
+					
+					//int nextByte5 = fullFileBytes[i + 5];
+					//if((nextByte5 >= 0x41 && nextByte5 <= 0x5A) || (nextByte5 >= 0x61 && nextByte5 <= 0x7A)) {
+						data = parseNonDialogue(fullFileBytes, i);
+						blockList.add(data);
+						i += data.getFullBlockLength();
+						lastBlockOfConv++;
+					//}
 					break;
 				default:
 					break;
@@ -262,7 +274,8 @@ public class ScriptReader {
 	}
 	
 	private byte[] parseSpeaker(int nextByte, int nextByte2, int nextByte3, int shift, byte[] fullFileBytes) {
-		if(nextByte < 0x05 && nextByte2 < 0x0F) {
+		if(nextByte < 0x05 && nextByte2 < 0x1F) {
+			//TODO: need to make it support japanese names
 			if((nextByte3 >= 0x41 && nextByte3 <= 0x5A) || (nextByte3 >= 0x61 && nextByte3 <= 0x7A)) {
 				//' is also used
 				//nextByte3 == DASH || nextByte3 == SPACE || 

@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.Map;
 
 import javax.swing.BorderFactory;
+import javax.swing.ButtonGroup;
 import javax.swing.DefaultListModel;
 import javax.swing.DefaultListSelectionModel;
 import javax.swing.JButton;
@@ -29,6 +30,7 @@ import javax.swing.JMenu;
 import javax.swing.JMenuBar;
 import javax.swing.JMenuItem;
 import javax.swing.JPanel;
+import javax.swing.JRadioButton;
 import javax.swing.JScrollPane;
 import javax.swing.JSpinner;
 import javax.swing.JTextArea;
@@ -54,6 +56,8 @@ public class MainWindow extends JFrame {
 	JMenuBar menuBar = new JMenuBar();
 	JMenu optionsMenu = new JMenu("Options");
 	JMenuItem loadFiles = new JMenuItem("Load");
+	JMenuItem loadF10 = new JMenuItem("Load font10");
+	JMenuItem loadF12 = new JMenuItem("Load font12");
 	JButton saveFileButton = new JButton("Save changes to file");
 	
 	DefaultListModel<ScriptReader> fileListModel = new DefaultListModel<ScriptReader>();
@@ -69,10 +73,18 @@ public class MainWindow extends JFrame {
 	JTextField originalSpeakerField = new JTextField(10);
 	JTextField newSpeakerField = new JTextField(10);
 	
+	ButtonGroup fontGroup = new ButtonGroup();
+	JRadioButton f10Button = new JRadioButton("font10");
+	JRadioButton f12Button = new JRadioButton("font12");
+	
 	LengthPanel originalLengths = new LengthPanel();
 	LengthPanel newLengths = new LengthPanel();
 	
 	private boolean setText = true;
+	
+	private Map<String, Integer> currentFontMap = null;
+	private Map<String, Integer> font10Map = null;
+	private Map<String, Integer> font12Map = null;
 	
 	private Map<ScriptReader, File> scriptMap = new HashMap<ScriptReader, File>();
 	private ScriptReader currentScript = null;
@@ -89,6 +101,8 @@ public class MainWindow extends JFrame {
 		setSize(700, 400);
 		
 		optionsMenu.add(loadFiles);
+		optionsMenu.add(loadF10);
+		optionsMenu.add(loadF12);
 		menuBar.add(optionsMenu);
 		setJMenuBar(menuBar);
 		
@@ -106,6 +120,17 @@ public class MainWindow extends JFrame {
 		
 		originalText.setFont(getFont());
 		newText.setFont(getFont());
+		
+		JPanel buttonPanel = new JPanel();
+		buttonPanel.add(f10Button);
+		buttonPanel.add(f12Button);
+		
+		fontGroup.add(f10Button);
+		fontGroup.add(f12Button);
+		f10Button.setActionCommand("f10");
+		f12Button.setActionCommand("f12");
+		f10Button.setEnabled(false);
+		f12Button.setEnabled(false);
 		
 		JPanel blockPanel = new JPanel();
 		blockPanel.setLayout(new GridBagLayout());
@@ -174,14 +199,18 @@ public class MainWindow extends JFrame {
 		
 		gbcon.anchor = GridBagConstraints.WEST;
 		addGB(blockPanel, 1, 0);
+		addGB(buttonPanel, 2, 0);
+		
+		gbcon.gridwidth = 2;
 		addGB(originalTextPanel, 1, 1);
 		addGB(newTextPanel, 1, 2);
-			
+		
+		gbcon.gridwidth = 1;
 		addGB(saveFileButton, 1, 3);
 		
 		gbcon.anchor = GridBagConstraints.NORTHWEST;
-		addGB(originalSpeakerPanel, 2, 1);
-		addGB(newSpeakerPanel, 2, 2);
+		addGB(originalSpeakerPanel, 3, 1);
+		addGB(newSpeakerPanel, 3, 2);
 		
 		initListeners();
 		originalText.setPreferredSize(getSize());
@@ -215,6 +244,47 @@ public class MainWindow extends JFrame {
 				}
 				else {
 					loadFile(file);
+				}
+			}
+		});
+		
+		/*
+		ActionListener loadFontListener = new ActionListener() {
+			public void actionPerformed(ActionEvent e) {
+				
+			}
+		}; */
+		
+		loadF10.addActionListener(event -> {
+			JFileChooser c = new JFileChooser();
+			c.showOpenDialog(this);
+			File file = c.getSelectedFile();
+			
+			if(file != null) {
+				try {
+					font10Map = new NFTRMap().parseNFTR(file);
+					if(font10Map != null) {
+						f10Button.setEnabled(true);
+					}
+				}
+				catch (IOException e) {
+				}
+			}
+		});
+		
+		loadF12.addActionListener(event -> {
+			JFileChooser c = new JFileChooser();
+			c.showOpenDialog(this);
+			File file = c.getSelectedFile();
+			
+			if(file != null) {
+				try {
+					font12Map = new NFTRMap().parseNFTR(file);
+					if(font12Map != null) {
+						f12Button.setEnabled(true);
+					}
+				}
+				catch (IOException e) {
 				}
 			}
 		});
@@ -262,38 +332,43 @@ public class MainWindow extends JFrame {
 			updateTextComponents();
 			currentString = newText.getText();
 			
-			String[] splits = currentBlock.getTextString().split("\n");
-			int i = 0;
-			while(i < MAXLINES) {
-				if(i < splits.length) {
-					originalLengths.setLabelText(i, splits[i].length());
+			List<String> splits = Arrays.asList(currentBlock.getTextString().split("\n"));
+			for(int i = 0; i < MAXLINES; i++) {
+				if(i < splits.size()) {
+					if(currentFontMap != null) {
+						originalLengths.setLabelText(i, getPixelLength(splits.get(i)));
+					}
+					else {
+						originalLengths.setLabelText(i, splits.get(i).length());
+					}
 				}
 				else {
 					originalLengths.setLabelText(i, -1);
 				}
-				i++;
 			}
 			
-			splits = currentString.split("\n");
+			splitString();
+			/*
+			splits = Arrays.asList(currentString.split("\n"));
 			i = 0;
 			int loc = 0;
-			while(i < splits.length) {
-				newLengths.setLabelText(i, splits[i].length());
+			while(i < splits.size()) {
+				newLengths.setLabelText(i, splits.get(i).length());
 				
-				newLineLocs[i] = loc + splits[i].length() + 1;
+				newLineLocs[i] = loc + splits.get(i).length() + 1;
 				loc += newLineLocs[i];
 				i++;
 			}
-			while(i < 6) {
+			while(i < MAXLINES) {
 				newLengths.setLabelText(i, -1);
 				newLineLocs[i] = -1;
 				i++;
 			}
+			*/
 		});
 		
 		newText.getDocument().addDocumentListener(new DocumentListener() {
 			public void changedUpdate(DocumentEvent e) {
-		
 			}
 
 			public void insertUpdate(DocumentEvent e) {
@@ -316,14 +391,12 @@ public class MainWindow extends JFrame {
 				int offset = e.getOffset();
 				int lineChanged = 0;
 				
-				//System.out.println(type + " length " + changeLength + " offset " + offset);
 				if(changeLength > 1) {
-					//if a large paste or delete happens, just resplit 
-					splitString();
+					splitString(); //if a large paste or delete happens, just resplit 
 					return;
 				}
 				
-				for(int i = 0; i < 6; i++) {
+				for(int i = 0; i < MAXLINES; i++) {
 					//int newLinePos = newLineLocs[i];
 					if(offset > newLineLocs[i]) {
 						continue;
@@ -335,28 +408,38 @@ public class MainWindow extends JFrame {
 			
 				if(type == EventType.INSERT) {
 					try {
-						if(doc.getText(offset, 1).equals("\n")) {
+						String newChar = doc.getText(offset, 1);
+						
+						if(newChar.equals("\n")) {
 							splitString();
 						}
 						else {
-							//System.out.println(lineChanged);
-							//System.out.println(newLineLocs[lineChanged]);
-							newLengths.setLabelText(lineChanged, newLengths.getLabelText(lineChanged) + 1);
+							if(currentFontMap != null) {
+								newLengths.setLabelText(lineChanged, newLengths.getLabelText(lineChanged) + currentFontMap.get(newChar));
+							}
+							else {
+								newLengths.setLabelText(lineChanged, newLengths.getLabelText(lineChanged) + 1);
+							}
 							newLineLocs[lineChanged]++;
 						}
 					}
 					catch (BadLocationException b) {
-							
 					}
 					currentString = newText.getText();
 				}
 				else if(type == EventType.REMOVE) {
-					//System.out.println("removed " + currentString.substring(offset, offset + 1).getBytes()[0]);
-					if(currentString.substring(offset, offset + 1).getBytes()[0] == 0x0A) { //a newline was deleted
+					String removedChar = currentString.substring(offset, offset + 1);
+					
+					if(removedChar.equals("\n")) { //a newline was deleted
 						splitString();
 					}
 					else {
-						newLengths.setLabelText(lineChanged, newLengths.getLabelText(lineChanged) - 1);
+						if(currentFontMap != null) {
+							newLengths.setLabelText(lineChanged, newLengths.getLabelText(lineChanged) - currentFontMap.get(removedChar));
+						}
+						else {
+							newLengths.setLabelText(lineChanged, newLengths.getLabelText(lineChanged) - 1);
+						}
 						newLineLocs[lineChanged]--;
 					}
 					currentString = newText.getText();
@@ -366,6 +449,14 @@ public class MainWindow extends JFrame {
 		
 		saveFileButton.addActionListener(event -> {
 			writeFile();
+		});
+		
+		f10Button.addActionListener(event -> {
+			currentFontMap = font10Map;
+		});
+		
+		f12Button.addActionListener(event -> {
+			currentFontMap = font12Map;
 		});
 	}
 	
@@ -390,43 +481,60 @@ public class MainWindow extends JFrame {
 		}
 	}
 	
+	private int getPixelLength(String string) {
+		int pixelLen = 0;
+		for(int i = 0; i < string.length(); i++) {
+			String chara = string.substring(i, i+1);
+			pixelLen += currentFontMap.get(chara);
+		}
+		return pixelLen;
+	}
+	
+	//TODO: this sometimes acts up
 	private void splitString() {
-		String[] splits = new String[6];
+		List<String> splits = new ArrayList<String>();
 		String text = newText.getText();
-		int i = 0;
 		int index = 0;
+		int arrayIndex = 0;
 		
-		while(i != -1) {
-			int oldI = i;
-			i = oldI != 0 ? i + 1 : i;
-			i = text.indexOf('\n', i);
+		while(index != -1) {
+			int prevIndex = index == 0 ? 0 : index + 1;
+			index = prevIndex == 0 ? index : index + 1;
+			index = text.indexOf('\n', index);
+			String substring = null;
 			
-			if(i == -1) { //no more newlines
-				if(oldI + 1 >= text.length()) {
-					splits[index] = "";
+			if(index == -1) { //no more newlines
+				if(prevIndex >= text.length()) {
+					substring = "";
 				}
 				else {
-					splits[index] = text.substring(oldI + 1);
+					substring = text.substring(prevIndex);
 				}
-				newLineLocs[index] = oldI + 1 + splits[index].length();
+				newLineLocs[arrayIndex] = prevIndex + substring.length();
 			}
 			else {
-				if(text.substring(oldI, i).equals("\n")) {
-					splits[index] = "";
+				if(text.substring(prevIndex, index).equals("\n")) {
+					substring = "";
 				}
 				else {
-					splits[index] = text.substring(oldI, i);
+					substring = text.substring(prevIndex, index);
 				}
-				newLineLocs[index] = i;
+				newLineLocs[arrayIndex] = index;
 			}
 			
-			newLengths.setLabelText(index, splits[index].length());
-			index++;
+			if(currentFontMap != null) {
+				newLengths.setLabelText(arrayIndex, getPixelLength(substring));
+			}
+			else {
+				newLengths.setLabelText(arrayIndex, substring.length());
+			}
+			splits.add(substring);
+			arrayIndex++;
 		}
-		while(index < 6) {
-			newLengths.setLabelText(index, -1);
-			newLineLocs[index] = -1;
-			index++;
+		while(arrayIndex < MAXLINES) {
+			newLengths.setLabelText(arrayIndex, -1);
+			newLineLocs[arrayIndex] = -1;
+			arrayIndex++;
 		}
 	}
 	
@@ -665,6 +773,9 @@ public class MainWindow extends JFrame {
 		public void setLabelText(int label, int content) {
 			if(content == -1) {
 				labels.get(label).setText("");
+			}
+			else if(label > 5) {
+				return;
 			}
 			else {
 				labels.get(label).setText(Integer.toString(content));
