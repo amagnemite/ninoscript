@@ -11,6 +11,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -45,13 +46,17 @@ import javax.swing.filechooser.FileFilter;
 import javax.swing.text.BadLocationException;
 import javax.swing.text.Document;
 
-import ninoscript.ScriptReader.BlockData;
+import ninoscript.BlockData.*;
 import ninoscript.ScriptReader.ConversationData;
 import ninoscript.ScriptReader.Magic;
 
 @SuppressWarnings("serial")
 public class MainWindow extends JFrame {
 	private static final int MAXLINES = 6;
+	private static final String ORIGINALSPEAKER = "Original speaker";
+	private static final String NEWSPEAKER = "Modified speaker";
+	private static final String ORIGINALANSWER = "Original answer";
+	private static final String NEWANSWER = "Modified answer";
 	
 	JMenuBar menuBar = new JMenuBar();
 	JMenu optionsMenu = new JMenu("Options");
@@ -70,8 +75,8 @@ public class MainWindow extends JFrame {
 	JList<Integer> originalTextLenLists = new JList<Integer>();
 	JTextArea newText = new JTextArea(6, 35);
 	JList<Integer> newTextLenLists = new JList<Integer>();
-	JTextField originalSpeakerField = new JTextField(10);
-	JTextField newSpeakerField = new JTextField(10);
+	JTextField originalExtraField = new JTextField(10);
+	JTextField newExtraField = new JTextField(10);
 	
 	ButtonGroup fontGroup = new ButtonGroup();
 	JRadioButton f10Button = new JRadioButton("font10");
@@ -80,6 +85,10 @@ public class MainWindow extends JFrame {
 	LengthPanel originalLengths = new LengthPanel();
 	LengthPanel newLengths = new LengthPanel();
 	
+	JPanel originalExtraPanel = new JPanel();
+	JPanel newExtraPanel = new JPanel();
+	
+	private boolean isSpeakerBorder = true;
 	private boolean setText = true;
 	
 	private Map<String, Integer> currentFontMap = null;
@@ -90,8 +99,7 @@ public class MainWindow extends JFrame {
 	private ScriptReader currentScript = null;
 	private BlockData currentBlock;
 	private String currentString;
-	//private List<String> substringList = new ArrayList<String>();
-	private int[] newLineLocs = {-1, -1, -1, -1, -1, -1};
+	private List<Integer> newLineLocs = new ArrayList<Integer>();
 	
 	private GridBagConstraints gbcon = new GridBagConstraints();
 	
@@ -111,12 +119,12 @@ public class MainWindow extends JFrame {
 		
 		originalText.setEditable(false);
 		originalText.setOpaque(false);
-		originalSpeakerField.setEditable(false);
+		originalExtraField.setEditable(false);
 		
 		originalText.setMinimumSize(originalText.getPreferredSize());
 		newText.setMinimumSize(newText.getPreferredSize());
-		originalSpeakerField.setMinimumSize(originalSpeakerField.getPreferredSize());
-		newSpeakerField.setMinimumSize(newSpeakerField.getPreferredSize());
+		originalExtraField.setMinimumSize(originalExtraField.getPreferredSize());
+		newExtraField.setMinimumSize(newExtraField.getPreferredSize());
 		
 		originalText.setFont(getFont());
 		newText.setFont(getFont());
@@ -178,13 +186,11 @@ public class MainWindow extends JFrame {
 		c.insets = new Insets(2, 0, 0, 0);
 		newTextPanel.add(newLengths, c);
 		
-		JPanel originalSpeakerPanel = new JPanel();
-		originalSpeakerPanel.setBorder(BorderFactory.createTitledBorder("Original speaker"));
-		originalSpeakerPanel.add(originalSpeakerField);
+		originalExtraPanel.setBorder(BorderFactory.createTitledBorder(ORIGINALSPEAKER));
+		originalExtraPanel.add(originalExtraField);
 		
-		JPanel newSpeakerPanel = new JPanel();
-		newSpeakerPanel.setBorder(BorderFactory.createTitledBorder("Modified speaker"));
-		newSpeakerPanel.add(newSpeakerField);
+		newExtraPanel.setBorder(BorderFactory.createTitledBorder(NEWSPEAKER));
+		newExtraPanel.add(newExtraField);
 		
 		JScrollPane fileScroll = new JScrollPane(fileList);
 		fileScroll.setMinimumSize(new Dimension(fileList.getPreferredScrollableViewportSize().width, 
@@ -209,8 +215,8 @@ public class MainWindow extends JFrame {
 		addGB(saveFileButton, 1, 3);
 		
 		gbcon.anchor = GridBagConstraints.NORTHWEST;
-		addGB(originalSpeakerPanel, 3, 1);
-		addGB(newSpeakerPanel, 3, 2);
+		addGB(originalExtraPanel, 3, 1);
+		addGB(newExtraPanel, 3, 2);
 		
 		initListeners();
 		originalText.setPreferredSize(getSize());
@@ -297,24 +303,22 @@ public class MainWindow extends JFrame {
 					for(BlockData block : currentScript.getBlockList()) {
 						//wipes any new stuff that wasn't saved to file
 						block.setNewTextString(block.getTextString());
-						block.setNewSpeakerString(block.getSpeakerString());
+						if(block.hasExtraInfo()) {
+							((ExtraInfoBlockData) block).setNewExtraInfoString(((ExtraInfoBlockData) block).getExtraInfoString());
+						}
 					}
 				}
 			
+				//might need a is this file still here check
 				currentScript = fileList.getSelectedValue();
 				
-				/*
-				textLengths.clear();
-				speakerLengths.clear();
-				for(BlockData data : currentScript.getBlockList()) {
-					textLengths.add(data.getTextLength());
-					speakerLengths.add(data.getSpeakerLength());
-				}	
-				*/
-				
 				setText = false;
-				blockSpinnerModel.setValue(0);
+				blockSpinnerModel.setMinimum(-1);
+				blockSpinnerModel.setValue(-1);
 				blockSpinnerModel.setMaximum(currentScript.getBlockList().size() - 1);
+				
+				blockSpinnerModel.setValue(0);
+				blockSpinnerModel.setMinimum(0);
 				setText = true;
 				blockMaxLabel.setText("of " + (currentScript.getBlockList().size() - 1));
 			}
@@ -324,6 +328,9 @@ public class MainWindow extends JFrame {
 		});
 		
 		blockSpinner.addChangeListener(event -> {
+			if((int) blockSpinner.getValue() == -1) {
+				return;
+			}
 			if(setText) {
 				saveText();
 			}
@@ -398,7 +405,7 @@ public class MainWindow extends JFrame {
 				
 				for(int i = 0; i < MAXLINES; i++) {
 					//int newLinePos = newLineLocs[i];
-					if(offset > newLineLocs[i]) {
+					if(offset > newLineLocs.get(i)) {
 						continue;
 					}
 					
@@ -420,7 +427,7 @@ public class MainWindow extends JFrame {
 							else {
 								newLengths.setLabelText(lineChanged, newLengths.getLabelText(lineChanged) + 1);
 							}
-							newLineLocs[lineChanged]++;
+							newLineLocs.set(lineChanged, newLineLocs.get(lineChanged) + 1);
 						}
 					}
 					catch (BadLocationException b) {
@@ -440,7 +447,7 @@ public class MainWindow extends JFrame {
 						else {
 							newLengths.setLabelText(lineChanged, newLengths.getLabelText(lineChanged) - 1);
 						}
-						newLineLocs[lineChanged]--;
+						newLineLocs.set(lineChanged, newLineLocs.get(lineChanged) - 1);
 					}
 					currentString = newText.getText();
 				}
@@ -464,20 +471,29 @@ public class MainWindow extends JFrame {
 		originalText.setText(currentBlock.getTextString());
 		newText.setText(currentBlock.getNewTextString());
 		
-		if(currentBlock.getSpeakerString() != null) {
-			originalSpeakerField.setText(currentBlock.getSpeakerString());
-			newSpeakerField.setText(currentBlock.getNewSpeakerString());
-			newSpeakerField.setEnabled(true);
-		}
-		else {
-			originalSpeakerField.setText("");
-			newSpeakerField.setText("");
-			if(currentBlock.getMagic() == Magic.NONDIALOGUE) {
-				newSpeakerField.setEnabled(false);
+		if(currentBlock.hasExtraInfo()) {
+			originalExtraField.setText(((ExtraInfoBlockData) currentBlock).getExtraInfoString());
+			newExtraField.setText(((ExtraInfoBlockData) currentBlock).getNewExtraInfoString());
+			newExtraField.setEnabled(true);
+			
+			if(isSpeakerBorder && (currentBlock.getMagic() == Magic.TEXTENTRY || currentBlock.getMagic() == Magic.TEXTENTRYLONG)) {
+				originalExtraPanel.setBorder(BorderFactory.createTitledBorder(ORIGINALANSWER));
+				newExtraPanel.setBorder(BorderFactory.createTitledBorder(NEWANSWER));
+				isSpeakerBorder = false;
 			}
 			else {
-				newSpeakerField.setEnabled(true);
+				if(!isSpeakerBorder) {
+					originalExtraPanel.setBorder(BorderFactory.createTitledBorder(ORIGINALSPEAKER));
+					newExtraPanel.setBorder(BorderFactory.createTitledBorder(NEWSPEAKER));
+					isSpeakerBorder = true;
+				}
 			}
+			newExtraField.setEnabled(true);
+		}
+		else {
+			originalExtraField.setText("");
+			newExtraField.setText("");
+			newExtraField.setEnabled(false);
 		}
 	}
 	
@@ -485,7 +501,9 @@ public class MainWindow extends JFrame {
 		int pixelLen = 0;
 		for(int i = 0; i < string.length(); i++) {
 			String chara = string.substring(i, i+1);
-			pixelLen += currentFontMap.get(chara);
+			if(currentFontMap.containsKey(chara)) {
+				pixelLen += currentFontMap.get(chara);
+			}
 		}
 		return pixelLen;
 	}
@@ -494,32 +512,35 @@ public class MainWindow extends JFrame {
 	private void splitString() {
 		List<String> splits = new ArrayList<String>();
 		String text = newText.getText();
-		int index = 0;
+		int stringIndex = 0;
 		int arrayIndex = 0;
+		newLineLocs.clear();
 		
-		while(index != -1) {
-			int prevIndex = index == 0 ? 0 : index + 1;
-			index = prevIndex == 0 ? index : index + 1;
-			index = text.indexOf('\n', index);
+		while(stringIndex != -1) {
+			int prevIndex = stringIndex == 0 ? 0 : stringIndex + 1;
+			stringIndex = prevIndex == 0 ? stringIndex : stringIndex + 1;
+			stringIndex = text.indexOf('\n', stringIndex);
 			String substring = null;
 			
-			if(index == -1) { //no more newlines
+			if(stringIndex == -1) { //no more newlines
 				if(prevIndex >= text.length()) {
 					substring = "";
 				}
 				else {
 					substring = text.substring(prevIndex);
 				}
-				newLineLocs[arrayIndex] = prevIndex + substring.length();
+				//newLineLocs[arrayIndex] = prevIndex + substring.length();
+				newLineLocs.add(prevIndex + substring.length());
 			}
 			else {
-				if(text.substring(prevIndex, index).equals("\n")) {
+				if(text.substring(prevIndex, stringIndex).equals("\n")) {
 					substring = "";
 				}
 				else {
-					substring = text.substring(prevIndex, index);
+					substring = text.substring(prevIndex, stringIndex);
 				}
-				newLineLocs[arrayIndex] = index;
+				//newLineLocs[arrayIndex] = stringIndex;
+				newLineLocs.add(stringIndex);
 			}
 			
 			if(currentFontMap != null) {
@@ -533,7 +554,7 @@ public class MainWindow extends JFrame {
 		}
 		while(arrayIndex < MAXLINES) {
 			newLengths.setLabelText(arrayIndex, -1);
-			newLineLocs[arrayIndex] = -1;
+			newLineLocs.add(-1);
 			arrayIndex++;
 		}
 	}
@@ -541,16 +562,25 @@ public class MainWindow extends JFrame {
 	private void clearComponents() {
 		originalText.setText("");
 		newText.setText("");
-		originalSpeakerField.setText("");
-		newSpeakerField.setText("");
+		originalExtraField.setText("");
+		newExtraField.setText("");
 		blockSpinner.setValue(0);
 		blockMaxLabel.setText("of 0");
 	}
 	
 	private void saveText() {
-		currentBlock.setNewTextString(newText.getText());
-		if(currentBlock.hasSpeaker()) {
-			currentBlock.setNewSpeakerString(newSpeakerField.getText());
+		if(currentBlock.getSharedStringList() != null) {
+			for(BlockData block : currentBlock.getSharedStringList()) {
+				block.setNewTextString(newText.getText());
+			}
+		}
+		else {
+			currentBlock.setNewTextString(newText.getText());
+		}
+		
+		//for now keep speakers separate, but i think most of them are the same
+		if(currentBlock.hasExtraInfo()) {
+			((ExtraInfoBlockData) currentBlock).setNewExtraInfoString(newExtraField.getText());
 		}
 	}
 	
@@ -577,28 +607,27 @@ public class MainWindow extends JFrame {
 			int oldTotalBlocksSize = 0;
 			int newTotalBlocksSize = 0;
 			Map<BlockData, byte[]> blockMap = new HashMap<BlockData, byte[]>();
-			Map<BlockData, byte[]> speakerMap = new HashMap<BlockData, byte[]>();
+			Map<BlockData, byte[]> extraDataMap = new HashMap<BlockData, byte[]>();
 			
 			//first loop to get the new convo size
 			for(int j = firstBlock; j < lastBlock + 1; j++) {
 				BlockData block = currentScript.getBlockList().get(j);
 				oldTotalBlocksSize += block.getFullBlockLength();
-				int speakerSizeDiff = 0;
+				int extraInfoSizeDiff = 0;
 				byte[] newStringBytes = null;
-				byte[] newSpeakerBytes = null;
+				byte[] newExtraInfoBytes = null;
 				try {
 					newStringBytes = block.getNewTextString().getBytes("Shift-JIS");
-					newSpeakerBytes = block.getSpeakerString() != null ? block.getNewSpeakerString().getBytes("Shift-JIS") : null;
+					if(block.hasExtraInfo()) {
+						newExtraInfoBytes = ((ExtraInfoBlockData) block).getNewExtraInfoString().getBytes("Shift-JIS");
+						extraInfoSizeDiff = newExtraInfoBytes.length - ((ExtraInfoBlockData) block).getExtraInfoLength();
+						extraDataMap.put(block, newExtraInfoBytes);
+					}
 				}
 				catch (UnsupportedEncodingException e) {
 				}
 				
-				if(block.hasSpeaker()) {
-					speakerSizeDiff = newSpeakerBytes.length - block.getSpeakerLength();
-					speakerMap.put(block, newSpeakerBytes);
-				}
-				
-				newTotalBlocksSize += block.getFullBlockLength() + (newStringBytes.length - block.getTextLength()) + speakerSizeDiff;
+				newTotalBlocksSize += block.getFullBlockLength() + (newStringBytes.length - block.getTextLength()) + extraInfoSizeDiff;
 				blockMap.put(block, newStringBytes);
 			}
 			newConvoSize = (convo.getLength() - oldTotalBlocksSize) + newTotalBlocksSize;
@@ -608,12 +637,11 @@ public class MainWindow extends JFrame {
 				fw.write(fullFileBytes, originalFileIndex, convo.getStart() - originalFileIndex);
 				
 				//write gets upset if >255 and need to pad 00s anyway
-				byte[] lengthBytes = ByteBuffer.allocate(4).putInt(newConvoSize).array();
-				fw.write(lengthBytes[3]);
-				fw.write(lengthBytes[2]);
-				fw.write(lengthBytes[1]);
-				fw.write(lengthBytes[0]);
+				ByteBuffer bb = ByteBuffer.allocate(4);
+				bb.order(ByteOrder.LITTLE_ENDIAN);
+				byte[] lengthBytes = bb.putInt(newConvoSize).array();
 				
+				fw.write(lengthBytes);				
 				fw.write(CONVERSATIONMARKER);
 				
 				originalFileIndex += (convo.getStart() - originalFileIndex) + 8;
@@ -624,49 +652,66 @@ public class MainWindow extends JFrame {
 			for(int j = firstBlock; j < lastBlock + 1; j++) {
 				BlockData block = currentScript.getBlockList().get(j);
 				byte[] stringBytes = blockMap.get(block);
-				byte[] newSpeakerBytes = block.getSpeakerString() != null ? speakerMap.get(block) : null;
+				byte[] extraInfoBytes = null;
 				int newBlockLength = 0;
-				int speakerSizeDiff = 0;
+				int extraInfoSizeDiff = 0;
 				
-				if(block.hasSpeaker()) {
-					speakerSizeDiff = newSpeakerBytes.length - block.getSpeakerLength();
+				if(block.hasExtraInfo()) {
+					extraInfoBytes = extraDataMap.get(block);
+					extraInfoSizeDiff = extraInfoBytes.length - ((ExtraInfoBlockData) block).getExtraInfoLength();
 				}
-				newBlockLength = block.getFullBlockLength() + (stringBytes.length - block.getTextLength()) + speakerSizeDiff;
+				newBlockLength = block.getFullBlockLength() + (stringBytes.length - block.getTextLength()) + extraInfoSizeDiff;
 				
 				try {
 					//write everything up to this block
 					fw.write(fullFileBytes, originalFileIndex, block.getBlockStart() - originalFileIndex);
-					int bytes = 0;
+					Magic magic = block.getMagic();
+					byte[] info = magic.getFormat();
 					
-					//write the rest of the block + text header
-					fw.write(block.getMagic().getValue());
-					fw.write(newBlockLength);
-					fw.write(0x00);
-					fw.write(0x01);
-					fw.write(stringBytes.length);
+					byte[] lengthBytes = getShortBytes(newBlockLength);
+					info[magic.getFullLengthOffset()] = lengthBytes[0];
+					info[magic.getFullLengthOffset() + 1] = lengthBytes[1];
 					
-					if(block.getMagic() == Magic.DIALOGUE) {
-						fw.write(0x00);
-						bytes = 6;
+					//this writes the length of the chunk of data that comes first
+					if(magic == Magic.DIALOGUE) {
+						lengthBytes = getShortBytes(stringBytes.length);
+						info[magic.getTextLengthOffset()] = lengthBytes[0];
+						info[magic.getTextLengthOffset() + 1] = lengthBytes[1];
+					}
+					else if(magic == Magic.NONDIALOGUE) { //nondialogue can only be 1 byte length long
+						info[magic.getTextLengthOffset()] = Integer.valueOf(stringBytes.length).byteValue();
 					}
 					else {
-						bytes = 5;
-					}		
-				
-					originalFileIndex += (block.getBlockStart() - originalFileIndex) + bytes;
+						lengthBytes = getShortBytes(extraInfoBytes.length);
+						info[magic.getTextLengthOffset()] = lengthBytes[0];
+						info[magic.getTextLengthOffset() + 1] = lengthBytes[1];
+					}
+					
+					fw.write(info);
+					originalFileIndex += (block.getBlockStart() - originalFileIndex) + info.length;
 					
 					//at this point, file should be at textStart
-					fw.write(stringBytes);
-					originalFileIndex += block.getTextLength();
-					
-					if(block.hasSpeaker()) {
-						//speaker header
-						fw.write(fullFileBytes, originalFileIndex, (block.getSpeakerStart() - originalFileIndex) + SPEAKERLENGTHOFFSET);	
+					if(magic == Magic.DIALOGUE || magic == Magic.NONDIALOGUE) {
+						fw.write(stringBytes);
+						originalFileIndex += block.getTextLength();
 						
-						fw.write(newSpeakerBytes.length);
-						fw.write(newSpeakerBytes);
-						
-						originalFileIndex += (block.getSpeakerStart() - originalFileIndex) + block.getSpeakerLength();
+						if(block.hasExtraInfo()) {
+							//speaker header
+							fw.write(fullFileBytes, originalFileIndex, (((ExtraInfoBlockData) block).getExtraInfoStart() - originalFileIndex) + SPEAKERLENGTHOFFSET);	
+							
+							fw.write(extraInfoBytes.length);
+							fw.write(extraInfoBytes);
+							
+							originalFileIndex += (((ExtraInfoBlockData) block).getExtraInfoStart() - originalFileIndex) + ((ExtraInfoBlockData) block).getExtraInfoLength();
+						}
+					}
+					else {
+						fw.write(extraInfoBytes);
+						originalFileIndex += ((ExtraInfoBlockData) block).getExtraInfoLength();
+						lengthBytes = getShortBytes(stringBytes.length);
+						fw.write(lengthBytes);
+						fw.write(stringBytes);
+						originalFileIndex += (block.getTextStart() - originalFileIndex) + block.getTextLength();
 					}
 				}
 				catch (IOException e) {
@@ -687,6 +732,13 @@ public class MainWindow extends JFrame {
 		}
 		
 		reloadFile(scriptMap.get(currentScript));
+	}
+	
+	private byte[] getShortBytes(int integer) {
+		ByteBuffer bb = ByteBuffer.allocate(2);
+		bb.order(ByteOrder.LITTLE_ENDIAN);
+		
+		return bb.putShort((short) integer).array();
 	}
 	
 	private void loadFile(File file) { //dump old list, load one file

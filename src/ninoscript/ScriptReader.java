@@ -6,20 +6,49 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+import ninoscript.BlockData.*;
 
 public class ScriptReader {
 	public enum Magic {
-		DIALOGUE (Integer.valueOf(0x05).byteValue()),
-		NONDIALOGUE (Integer.valueOf(0x26).byteValue());
+		DIALOGUE (Integer.valueOf(0x05).byteValue(), new byte[] {0x05, 0x00, 0x00, 0x01, 0x00, 0X00}, 1, 4),
+		NONDIALOGUE (Integer.valueOf(0x26).byteValue(), new byte[] {0x26, 0x00, 0x00, 0x01, 0x00}, 1, 4),
+		TEXTENTRY (Integer.valueOf(0x31).byteValue(), new byte[] {0x31, 0x00, 0x00, 0x07, 0x02, 0x02, 0x00, 0x00}, 1, 6),
+		TEXTENTRYLONG (Integer.valueOf(0x31).byteValue(), 
+				new byte[] {0x31, 0x00, 0x00, 0x07, 0x03, 0x01, 0x01, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00}, 1, 11);
+		//31 E4 00 07 02 02 09 00
+		//31 2C 01 07 03 01 01 00 00 00 02 02 00
 		
 		private byte value;
-		Magic(byte value) {
+		private byte[] format;
+		private int fullLengthOffset;
+		private int textLengthOffset;
+		Magic(byte value, byte[] format, int fullLengthOffset, int textLengthOffset) {
 			this.value = value;
+			this.format = format;
+			this.fullLengthOffset = fullLengthOffset;
+			this.textLengthOffset = textLengthOffset;
 		}
 		
 		public byte getValue() {
 			return value;
+		}
+		
+		public byte[] getFormat() {
+			return format;
+		}
+		
+		public int getFullLengthOffset() {
+			return fullLengthOffset;
+		}
+		
+		public int getTextLengthOffset() {
+			return textLengthOffset;
 		}
 	}
 	
@@ -27,8 +56,6 @@ public class ScriptReader {
 	private static final int SCRIPTNAMEINDEX = 8;
 	private static final byte m = 0x6D;
 	private static final byte p = 0x70;
-	//private static final byte DASH = 0x2D;
-	//private static final byte SPACE = 0x20;
 	
 	private String fileName;
 	private byte[] fullFileBytes;
@@ -36,6 +63,11 @@ public class ScriptReader {
 	private List<ConversationData> convoList = new ArrayList<ConversationData>();
 	private List<BlockData> blockList = new ArrayList<BlockData>();
 	
+	//only keep track of the first block that stores the string, since we can just cross reference in the stringlistmap
+	private Map<String, BlockData> existingStringMap = new HashMap<String, BlockData>();
+	private Map<String, List<BlockData>> stringListMap = new HashMap<String, List<BlockData>>();
+	
+	//TODO: need to support the 2 byte lengths properly
 	public ScriptReader(File file) {
 		try {
 			FileInputStream input = new FileInputStream(file);
@@ -69,7 +101,6 @@ public class ScriptReader {
 			scriptName = new String(nameBytes, "Shift-JIS");
 		}
 		catch (UnsupportedEncodingException e) {
-			
 		}
 		
 		for(int i = 0; i < fullFileBytes.length; i++) {
@@ -104,15 +135,17 @@ public class ScriptReader {
 				case 0x05:
 					//it seems that the max block length should be 255 bytes?
 					//longest so far is 210
-					//so 05 01-FF 00 01 01-FF 00
+					//so 05 01-FF 00-FF 01 01-FF 00-FF
 					
 					if(fullFileBytes[i + 1] == 0x00) {
 						continue;
 					}
 					
+					/*
 					if(fullFileBytes[i + 2] != 0x00) {
 						continue;
 					}
+					*/
 					
 					if(fullFileBytes[i + 3] != 0x01) {
 						continue;
@@ -122,30 +155,41 @@ public class ScriptReader {
 						continue;
 					}
 					
+					/*
 					if(fullFileBytes[i + 5] != 0x00) {
 						continue;
 					}
+					*/
 					
 					//there's blocks with a leading 04 that otherwise follow the header style but aren't headers
 					if(fullFileBytes[i - 1] == 0x04) {
 						continue;
 					}
 					
-					data = parseBlock(fullFileBytes, i);
-					blockList.add(data);
-					i += data.getFullBlockLength();
-					lastBlockOfConv++;
+					if(isCharacter(Byte.toUnsignedInt(fullFileBytes[i + 6]))) {
+						data = parseBlock(fullFileBytes, i);
+						blockList.add(data);
+						checkIfStringExists(data);
+						i += data.getFullBlockLength();
+						lastBlockOfConv++;
+					}
 					break;
 				case 0x26:
 					//non conversation text
-					//format of 26 [full length] 00 01 [text length]
+					//format of 26 01-FF 00-FF 01 1-FF
+					if(fullFileBytes[i - 1] != 0x00) {
+						continue;
+					}
+					
 					if(fullFileBytes[i + 1] == 0x00) {
 						continue;
 					}
 					
+					/*
 					if(fullFileBytes[i + 2] != 0x00) {
 						continue;
 					}
+					*/
 					
 					if(fullFileBytes[i + 3] != 0x01) {
 						continue;
@@ -155,13 +199,49 @@ public class ScriptReader {
 						continue;
 					}
 					
-					//int nextByte5 = fullFileBytes[i + 5];
-					//if((nextByte5 >= 0x41 && nextByte5 <= 0x5A) || (nextByte5 >= 0x61 && nextByte5 <= 0x7A)) {
+					if(isCharacter(Byte.toUnsignedInt(fullFileBytes[i + 5]))) {
 						data = parseNonDialogue(fullFileBytes, i);
 						blockList.add(data);
+						checkIfStringExists(data);
 						i += data.getFullBlockLength();
 						lastBlockOfConv++;
-					//}
+					}
+					break;
+				case 0x31:
+					//text entry puzzle
+					//there seems to be two variants of this
+					//31 [2B length] 07 02 02 [answer length] 00 
+					//31 [2B length] 07 03 01 01 00 00 00 02 [answer length] 00
+					
+					if(fullFileBytes.length < i + 6) {
+						continue;
+					}
+					
+					int nextByte1 = fullFileBytes[i + 4];
+					int nextByte2 = fullFileBytes[i + 5];
+					int nextByte3 = fullFileBytes[i + 6];
+					
+					if(fullFileBytes[i + 3] != 0x07) {
+						continue;
+					}
+					
+					if(nextByte1 != 0x02 && nextByte1 != 0x03) {
+						continue;
+					}
+					
+					if(nextByte2 != 0x01 && nextByte1 != 0x02) {
+						continue;
+					}
+					
+					if(nextByte3 > 0x0F) {
+						continue;
+					}
+					
+					data = parseTextEntry(fullFileBytes, i);
+					blockList.add(data);
+					i += data.getFullBlockLength();
+					lastBlockOfConv++;
+					
 					break;
 				default:
 					break;
@@ -171,18 +251,50 @@ public class ScriptReader {
 			convoList.get(convoList.size() - 1).setLastBlock(lastBlockOfConv - 1);
 		}
 	}
+	
+	private boolean isCharacter(int val) {
+		if((val >= 0x81 && val <= 0x84) || (val >= 0x21 && val <= 0x7E)) {
+			return true;
+		}
+		return false;
+	}
+	
+	private void checkIfStringExists(BlockData data) {
+		String string = data.getTextString();
+		
+		if(!existingStringMap.containsKey(string)) {
+			existingStringMap.put(string, data);
+		}
+		else {
+			BlockData firstBlock = existingStringMap.get(string);
+			List<BlockData> sublist;
+			if(!stringListMap.containsKey(string)) {
+				sublist = new ArrayList<BlockData>();
+				stringListMap.put(string, sublist);
+				
+				sublist.add(firstBlock);	
+				firstBlock.setSharedStringList(sublist);	
+			}
+			else {
+				sublist = stringListMap.get(string);
+			}
+			sublist.add(data);
+			data.setSharedStringList(sublist);
+		}
+	}
 
 	private BlockData parseBlock(byte[] fullFileBytes, int start) {
-		int shift = start; //starts at the 05 loc
+		//TODO: may want to do something about 0x1c, which the jpn ver seems to use and sometimes appears in scripts
+		int shift = start + 1; //now at full length byte
 		byte[] textBytes;
 		byte[] speakerBytes = null;
 		int speakerLength = -1;
 		int speakerStart = -1;
-
-		int fullBlockLength = fullFileBytes[shift + 1] & 0xFF;
 		
-		shift += 4; //skip [length] 00 [01]
-		int textLength = fullFileBytes[shift] & 0xFF;
+		int fullBlockLength = (fullFileBytes[shift] & 0xFF) | (fullFileBytes[shift + 1] & 0xFF) << 8;
+		
+		shift += 3; //skip [length1] [length2] 01
+		int textLength = (fullFileBytes[shift] & 0xFF) | (fullFileBytes[shift + 1] & 0xFF) << 8;
 		
 		shift += 2;
 		int textStart = shift;
@@ -251,15 +363,15 @@ public class ScriptReader {
 			}
 		}
 	
-		return new BlockData(Magic.DIALOGUE, start, fullBlockLength, textLength, textStart, speakerStart, speakerLength, textBytes, speakerBytes);
+		return new ExtraInfoBlockData(Magic.DIALOGUE, start, fullBlockLength, textLength, textStart, speakerStart, speakerLength, textBytes, speakerBytes);
 	}
 	
 	private BlockData parseNonDialogue(byte[] fullFileBytes, int start) {
-		int shift = start; //starts at 0x26
+		int shift = start + 1; //starts at full length
 		byte[] textBytes;
-		int fullBlockLength = fullFileBytes[shift + 1] & 0xFF;
+		int fullBlockLength = (fullFileBytes[shift] & 0xFF) | (fullFileBytes[shift + 1] & 0xFF) << 8;
 		
-		shift += 4; //skip [length] 00 [01]
+		shift += 3; //skip [length1] [length2] 01
 		int textLength = fullFileBytes[shift] & 0xFF;
 		
 		shift++;
@@ -275,11 +387,8 @@ public class ScriptReader {
 	
 	private byte[] parseSpeaker(int nextByte, int nextByte2, int nextByte3, int shift, byte[] fullFileBytes) {
 		if(nextByte < 0x05 && nextByte2 < 0x1F) {
-			//TODO: need to make it support japanese names
-			if((nextByte3 >= 0x41 && nextByte3 <= 0x5A) || (nextByte3 >= 0x61 && nextByte3 <= 0x7A)) {
-				//' is also used
-				//nextByte3 == DASH || nextByte3 == SPACE || 
-				//00-03 00-04 00-0E [a letter]
+			if(isCharacter(nextByte3)) {
+				//00-03 00-04 00-1f [a letter]
 				//likely a speaker header
 				
 				int speakerLength = nextByte2;
@@ -297,6 +406,50 @@ public class ScriptReader {
 		else {
 			return null;
 		}
+	}
+	
+	private BlockData parseTextEntry(byte[] fullFileBytes, int start) {
+		int shift = start + 1;
+		byte[] textBytes;
+		byte[] answerBytes;
+		int fullBlockLength = (fullFileBytes[shift] & 0xFF) | (fullFileBytes[shift + 1] & 0xFF) << 8;
+		int answerLength = -1;
+		int answerStart = -1;
+		int textLength = -1;
+		Magic magic = null;
+		
+		//TODO: may want some special handling for the japanese ver, which seems to use 0A for a formatting thing
+		
+		shift += 3; //skip [length1] [length2] 07
+		if(fullFileBytes[shift] == 0x03 && fullFileBytes[shift + 1] == 0x01) {
+			magic = Magic.TEXTENTRYLONG;
+			shift += 7;
+			//skip 03 01 01 00 00 00 02
+		}
+		else {
+			magic = Magic.TEXTENTRY;
+			shift += 2;
+		}
+		answerLength = fullFileBytes[shift] & 0xFF;
+		shift += 2;
+		answerStart = shift;
+		
+		answerBytes = new byte[answerLength];
+		for(int i = 0; i < answerLength; i++) {
+			answerBytes[i] = fullFileBytes[shift + i];
+		}
+		shift += answerLength;
+		
+		textLength = (fullFileBytes[shift] & 0xFF) | (fullFileBytes[shift + 1] & 0xFF) << 8;
+		shift += 2;
+		int textStart = shift;
+		
+		textBytes = new byte[textLength];
+		for(int i = 0; i < textLength; i++) {
+			textBytes[i] = fullFileBytes[shift + i];
+		}
+		
+		return new ExtraInfoBlockData(magic, start, fullBlockLength, textLength, textStart, answerStart, answerLength, textBytes, answerBytes);
 	}
 	
 	public String toString() {
@@ -353,124 +506,6 @@ public class ScriptReader {
 
 		public void setLastBlock(int lastBlock) {
 			this.lastBlock = lastBlock;
-		}
-	}
-	
-	public static class BlockData {
-		private Magic magic;
-		private int blockStart;
-		private int fullBlockLength;
-		private int textStart;
-		private int textLength;
-		private int speakerStart; //actual start of the text, so -1 for length
-		private int speakerLength;
-		
-		private byte[] textBytes;
-		private byte[] speakerBytes;
-		private String textString;
-		private String speakerString = null;
-		private String newTextString;
-		private String newSpeakerString;
-		
-		public BlockData(Magic magic, int blockStart, int fullBlockLength, int textLength, int textStart, byte[] textBytes) {
-			this(magic, blockStart, fullBlockLength, textLength, textStart, -1, -1, textBytes, null);
-		}
-		
-		public BlockData(Magic magic, int blockStart, int fullBlockLength, int textLength, int textStart, int speakerStart, int speakerLength,
-				byte[] textBytes, byte[] speakerBytes) {
-			this.magic = magic;
-			this.blockStart = blockStart;
-			this.fullBlockLength = fullBlockLength;
-			this.textLength = textLength;
-			this.textStart = textStart;
-			this.speakerLength = speakerLength;
-			this.speakerStart = speakerStart;
-			this.textBytes = textBytes;
-			this.speakerBytes = speakerBytes;
-			
-			try {
-				textString = new String(textBytes, "Shift_JIS");
-				if(speakerBytes != null) {
-					speakerString = new String(speakerBytes, "Shift_JIS");
-				}
-			}
-			catch (UnsupportedEncodingException e) {
-			}
-			
-			newTextString = textString;
-			newSpeakerString = speakerString;
-		}
-		
-		public boolean hasSpeaker() {
-			return speakerBytes != null;
-		}
-
-		public String getNewTextString() {
-			return newTextString;
-		}
-
-		public void setNewTextString(String newTextString) {
-			this.newTextString = newTextString;
-		}
-
-		public String getNewSpeakerString() {
-			return newSpeakerString;
-		}
-
-		public void setNewSpeakerString(String newSpeakerString) {
-			this.newSpeakerString = newSpeakerString;
-		}
-
-		public int getFullBlockLength() {
-			return fullBlockLength;
-		}
-
-		public int getTextLength() {
-			return textLength;
-		}
-
-		public int getTextStart() {
-			return textStart;
-		}
-
-		public int getSpeakerStart() {
-			return speakerStart;
-		}
-
-		public int getSpeakerLength() {
-			return speakerLength;
-		}
-
-		public byte[] getTextBytes() {
-			return textBytes;
-		}
-
-		public byte[] getSpeakerBytes() {
-			return speakerBytes;
-		}
-		
-		public String getTextString() {
-			return textString;
-		}
-
-		public void setTextString(String textString) {
-			this.textString = textString;
-		}
-
-		public String getSpeakerString() {
-			return speakerString;
-		}
-
-		public void setSpeakerString(String speakerString) {
-			this.speakerString = speakerString;
-		}
-		
-		public Magic getMagic() {
-			return magic;
-		}
-		
-		public int getBlockStart() {
-			return blockStart;
 		}
 	}
 }
