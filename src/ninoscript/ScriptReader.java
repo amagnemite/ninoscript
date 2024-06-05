@@ -19,10 +19,13 @@ public class ScriptReader {
 		DIALOGUE (Integer.valueOf(0x05).byteValue(), new byte[] {0x05, 0x00, 0x00, 0x01, 0x00, 0X00}, 1, 4),
 		NONDIALOGUE (Integer.valueOf(0x26).byteValue(), new byte[] {0x26, 0x00, 0x00, 0x01, 0x00}, 1, 4),
 		TEXTENTRY (Integer.valueOf(0x31).byteValue(), new byte[] {0x31, 0x00, 0x00, 0x07, 0x02, 0x02, 0x00, 0x00}, 1, 6),
+		TEXTENTRYNODESCRIPT (Integer.valueOf(0x31).byteValue(), new byte[] {0x31, 0x00, 0x00, 0x07, 0x02, 0x01, 0x00, 0x00}, 1, 6),
 		TEXTENTRYLONG (Integer.valueOf(0x31).byteValue(), 
 				new byte[] {0x31, 0x00, 0x00, 0x07, 0x03, 0x01, 0x01, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00}, 1, 11);
-		//31 E4 00 07 02 02 09 00
-		//31 2C 01 07 03 01 01 00 00 00 02 02 00
+		
+		//31 [fulllength1] [fulllength2] 07 02 02 [answerlength] 00
+		//31 [fulllength1] [fulllength2] 07 02 01 [answerlength] 00
+		//31 [fulllength1] [fulllength2] 07 03 01 01 00 00 00 02 [answerlength] 00
 		
 		private byte value;
 		private byte[] format;
@@ -141,11 +144,9 @@ public class ScriptReader {
 						continue;
 					}
 					
-					/*
-					if(fullFileBytes[i + 2] != 0x00) {
+					if(fullFileBytes[i + 2] > 0x01) {
 						continue;
 					}
-					*/
 					
 					if(fullFileBytes[i + 3] != 0x01) {
 						continue;
@@ -155,11 +156,9 @@ public class ScriptReader {
 						continue;
 					}
 					
-					/*
-					if(fullFileBytes[i + 5] != 0x00) {
+					if(fullFileBytes[i + 5] > 0x01) {
 						continue;
 					}
-					*/
 					
 					//there's blocks with a leading 04 that otherwise follow the header style but aren't headers
 					if(fullFileBytes[i - 1] == 0x04) {
@@ -168,28 +167,30 @@ public class ScriptReader {
 					
 					if(isCharacter(Byte.toUnsignedInt(fullFileBytes[i + 6]))) {
 						data = parseBlock(fullFileBytes, i);
-						blockList.add(data);
-						checkIfStringExists(data);
-						i += data.getFullBlockLength();
-						lastBlockOfConv++;
+						if(data != null) {
+							blockList.add(data);
+							checkIfStringExists(data);
+							i += data.getFullBlockLength();
+							lastBlockOfConv++;
+						}
 					}
 					break;
 				case 0x26:
 					//non conversation text
 					//format of 26 01-FF 00-FF 01 1-FF
-					if(fullFileBytes[i - 1] != 0x00) {
-						continue;
-					}
+					//if(fullFileBytes[i - 1] != 0x00) {
+					//	continue;
+					//}
 					
 					if(fullFileBytes[i + 1] == 0x00) {
 						continue;
 					}
 					
-					/*
-					if(fullFileBytes[i + 2] != 0x00) {
+					
+					if(fullFileBytes[i + 2] > 0x01) {
 						continue;
 					}
-					*/
+					
 					
 					if(fullFileBytes[i + 3] != 0x01) {
 						continue;
@@ -299,10 +300,18 @@ public class ScriptReader {
 		shift += 2;
 		int textStart = shift;
 		
+		if(textLength > fullBlockLength) {
+			return null;
+		}
+		
 		textBytes = new byte[textLength];
 		for(int i = 0; i < textLength; i++) {
 			textBytes[i] = fullFileBytes[shift + i];
 		}
+		//post dialogue
+		//4D 50 00 00 = general?
+		//4D 11 00 00 = voice acted?
+		
 		
 		shift += textLength + PADDING1;
 		//starting at this point, blocks are variable
@@ -325,9 +334,10 @@ public class ScriptReader {
 						continue;
 					}
 					else {
-						speakerBytes = parseSpeaker(nextByte, nextByte2, nextByte3, shift, fullFileBytes);
+						byte[] check = parseSpeaker(nextByte, nextByte2, nextByte3, shift, fullFileBytes);
 						
-						if(speakerBytes != null) {
+						if(check != null) {
+							speakerBytes = check;
 							speakerLength = nextByte2;
 							speakerStart = shift + 3;
 							shift += 3 + speakerLength;
@@ -346,9 +356,10 @@ public class ScriptReader {
 					shift += 1 + (fullFileBytes[shift] & 0xFF);
 				}
 				else { //all we know is sub 0x0F val
-					speakerBytes = parseSpeaker(nextByte, nextByte2, nextByte3, shift, fullFileBytes);
+					byte[] check = parseSpeaker(nextByte, nextByte2, nextByte3, shift, fullFileBytes);
 										
-					if(speakerBytes != null) {
+					if(check != null) {
+						speakerBytes = check;
 						speakerLength = nextByte2;
 						speakerStart = shift + 3;
 						shift += 3 + speakerLength;
@@ -410,21 +421,29 @@ public class ScriptReader {
 	
 	private BlockData parseTextEntry(byte[] fullFileBytes, int start) {
 		int shift = start + 1;
-		byte[] textBytes;
+		byte[] textBytes = null;
 		byte[] answerBytes;
 		int fullBlockLength = (fullFileBytes[shift] & 0xFF) | (fullFileBytes[shift + 1] & 0xFF) << 8;
 		int answerLength = -1;
 		int answerStart = -1;
-		int textLength = -1;
+		int textLength = 0;
+		int textStart = 0;
 		Magic magic = null;
 		
 		//TODO: may want some special handling for the japanese ver, which seems to use 0A for a formatting thing
 		
 		shift += 3; //skip [length1] [length2] 07
-		if(fullFileBytes[shift] == 0x03 && fullFileBytes[shift + 1] == 0x01) {
+		int id1 = fullFileBytes[shift];
+		int id2 = fullFileBytes[shift + 1];
+		
+		if(id1 == 0x03 && id2 == 0x01) {
 			magic = Magic.TEXTENTRYLONG;
 			shift += 7;
 			//skip 03 01 01 00 00 00 02
+		}
+		else if(id1 == 0x02 && id2 == 0x01) {
+			magic = Magic.TEXTENTRYNODESCRIPT;
+			shift += 2;
 		}
 		else {
 			magic = Magic.TEXTENTRY;
@@ -440,13 +459,15 @@ public class ScriptReader {
 		}
 		shift += answerLength;
 		
-		textLength = (fullFileBytes[shift] & 0xFF) | (fullFileBytes[shift + 1] & 0xFF) << 8;
-		shift += 2;
-		int textStart = shift;
-		
-		textBytes = new byte[textLength];
-		for(int i = 0; i < textLength; i++) {
-			textBytes[i] = fullFileBytes[shift + i];
+		if(magic != Magic.TEXTENTRYNODESCRIPT) {
+			textLength = (fullFileBytes[shift] & 0xFF) | (fullFileBytes[shift + 1] & 0xFF) << 8;
+			shift += 2;
+			textStart = shift;
+			
+			textBytes = new byte[textLength];
+			for(int i = 0; i < textLength; i++) {
+				textBytes[i] = fullFileBytes[shift + i];
+			}
 		}
 		
 		return new ExtraInfoBlockData(magic, start, fullBlockLength, textLength, textStart, answerStart, answerLength, textBytes, answerBytes);

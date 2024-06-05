@@ -313,9 +313,9 @@ public class MainWindow extends JFrame {
 				currentScript = fileList.getSelectedValue();
 				
 				setText = false;
-				blockSpinnerModel.setMinimum(-1);
-				blockSpinnerModel.setValue(-1);
 				blockSpinnerModel.setMaximum(currentScript.getBlockList().size() - 1);
+				blockSpinnerModel.setMinimum(-1); //really roundabout way of always forcing the first block to be rendered
+				blockSpinnerModel.setValue(-1);
 				
 				blockSpinnerModel.setValue(0);
 				blockSpinnerModel.setMinimum(0);
@@ -468,6 +468,8 @@ public class MainWindow extends JFrame {
 	}
 	
 	private void updateTextComponents() {
+		Magic magic = currentBlock.getMagic();
+		
 		originalText.setText(currentBlock.getTextString());
 		newText.setText(currentBlock.getNewTextString());
 		
@@ -476,7 +478,8 @@ public class MainWindow extends JFrame {
 			newExtraField.setText(((ExtraInfoBlockData) currentBlock).getNewExtraInfoString());
 			newExtraField.setEnabled(true);
 			
-			if(isSpeakerBorder && (currentBlock.getMagic() == Magic.TEXTENTRY || currentBlock.getMagic() == Magic.TEXTENTRYLONG)) {
+			if(isSpeakerBorder && (magic == Magic.TEXTENTRY || magic == Magic.TEXTENTRYLONG ||
+					magic == Magic.TEXTENTRYNODESCRIPT)) {
 				originalExtraPanel.setBorder(BorderFactory.createTitledBorder(ORIGINALANSWER));
 				newExtraPanel.setBorder(BorderFactory.createTitledBorder(NEWANSWER));
 				isSpeakerBorder = false;
@@ -494,6 +497,13 @@ public class MainWindow extends JFrame {
 			originalExtraField.setText("");
 			newExtraField.setText("");
 			newExtraField.setEnabled(false);
+		}
+		
+		if(magic == Magic.TEXTENTRYNODESCRIPT) {
+			newText.setEnabled(false);
+		}
+		else {
+			newText.setEnabled(true);
 		}
 	}
 	
@@ -705,7 +715,7 @@ public class MainWindow extends JFrame {
 							originalFileIndex += (((ExtraInfoBlockData) block).getExtraInfoStart() - originalFileIndex) + ((ExtraInfoBlockData) block).getExtraInfoLength();
 						}
 					}
-					else {
+					else if (magic != Magic.TEXTENTRYNODESCRIPT){
 						fw.write(extraInfoBytes);
 						originalFileIndex += ((ExtraInfoBlockData) block).getExtraInfoLength();
 						lengthBytes = getShortBytes(stringBytes.length);

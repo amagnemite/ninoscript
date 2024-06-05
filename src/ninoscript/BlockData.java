@@ -28,7 +28,12 @@ public class BlockData {
 		this.textBytes = textBytes;
 		
 		try {
-			textString = new String(textBytes, "Shift_JIS");
+			if(textBytes == null) {
+				textString = "";
+			}
+			else {
+				textString = new String(textBytes, "Shift_JIS");
+			}
 		}
 		catch (UnsupportedEncodingException e) {
 		}
