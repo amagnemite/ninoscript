@@ -8,7 +8,9 @@ import java.awt.Insets;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
+import java.io.FileWriter;
 import java.io.IOException;
+import java.io.PrintWriter;
 import java.io.UnsupportedEncodingException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -313,13 +315,13 @@ public class MainWindow extends JFrame {
 				currentScript = fileList.getSelectedValue();
 				
 				setText = false;
-				blockSpinnerModel.setMaximum(currentScript.getBlockList().size() - 1);
 				blockSpinnerModel.setMinimum(-1); //really roundabout way of always forcing the first block to be rendered
 				blockSpinnerModel.setValue(-1);
-				
-				blockSpinnerModel.setValue(0);
+				blockSpinnerModel.setMaximum(currentScript.getBlockList().size() - 1);
 				blockSpinnerModel.setMinimum(0);
 				setText = true;
+				blockSpinnerModel.setValue(0);
+				
 				blockMaxLabel.setText("of " + (currentScript.getBlockList().size() - 1));
 			}
 			else {
@@ -328,12 +330,13 @@ public class MainWindow extends JFrame {
 		});
 		
 		blockSpinner.addChangeListener(event -> {
-			if((int) blockSpinner.getValue() == -1) {
+			if(!setText) {
 				return;
 			}
-			if(setText) {
+			if(currentBlock != null) {
 				saveText();
 			}
+			
 			currentBlock = currentScript.getBlockList().get((int) blockSpinner.getValue());
 			
 			updateTextComponents();
@@ -355,23 +358,6 @@ public class MainWindow extends JFrame {
 			}
 			
 			splitString();
-			/*
-			splits = Arrays.asList(currentString.split("\n"));
-			i = 0;
-			int loc = 0;
-			while(i < splits.size()) {
-				newLengths.setLabelText(i, splits.get(i).length());
-				
-				newLineLocs[i] = loc + splits.get(i).length() + 1;
-				loc += newLineLocs[i];
-				i++;
-			}
-			while(i < MAXLINES) {
-				newLengths.setLabelText(i, -1);
-				newLineLocs[i] = -1;
-				i++;
-			}
-			*/
 		});
 		
 		newText.getDocument().addDocumentListener(new DocumentListener() {
@@ -460,10 +446,12 @@ public class MainWindow extends JFrame {
 		
 		f10Button.addActionListener(event -> {
 			currentFontMap = font10Map;
+			splitString();
 		});
 		
 		f12Button.addActionListener(event -> {
 			currentFontMap = font12Map;
+			splitString();
 		});
 	}
 	
@@ -523,33 +511,37 @@ public class MainWindow extends JFrame {
 		List<String> splits = new ArrayList<String>();
 		String text = newText.getText();
 		int stringIndex = 0;
+		int prevStringIndex = 0;
 		int arrayIndex = 0;
+		boolean isFirstLoop = true;
+		
 		newLineLocs.clear();
 		
 		while(stringIndex != -1) {
-			int prevIndex = stringIndex == 0 ? 0 : stringIndex + 1;
-			stringIndex = prevIndex == 0 ? stringIndex : stringIndex + 1;
+			if(!isFirstLoop) {
+				stringIndex++;
+				prevStringIndex = stringIndex;
+			}
 			stringIndex = text.indexOf('\n', stringIndex);
 			String substring = null;
 			
 			if(stringIndex == -1) { //no more newlines
-				if(prevIndex >= text.length()) {
+				if(prevStringIndex >= text.length()) {
 					substring = "";
 				}
 				else {
-					substring = text.substring(prevIndex);
+					substring = text.substring(prevStringIndex);
 				}
-				//newLineLocs[arrayIndex] = prevIndex + substring.length();
-				newLineLocs.add(prevIndex + substring.length());
+				newLineLocs.add(prevStringIndex + substring.length());
 			}
 			else {
-				if(text.substring(prevIndex, stringIndex).equals("\n")) {
+				if(text.substring(prevStringIndex, stringIndex).equals("\n")) {
+					System.out.println("newline");
 					substring = "";
 				}
 				else {
-					substring = text.substring(prevIndex, stringIndex);
+					substring = text.substring(prevStringIndex, stringIndex);
 				}
-				//newLineLocs[arrayIndex] = stringIndex;
 				newLineLocs.add(stringIndex);
 			}
 			
@@ -561,6 +553,7 @@ public class MainWindow extends JFrame {
 			}
 			splits.add(substring);
 			arrayIndex++;
+			isFirstLoop = false;
 		}
 		while(arrayIndex < MAXLINES) {
 			newLengths.setLabelText(arrayIndex, -1);
@@ -644,17 +637,23 @@ public class MainWindow extends JFrame {
 			
 			try {
 				//write everything up to the index of length of the convo start
-				fw.write(fullFileBytes, originalFileIndex, convo.getStart() - originalFileIndex);
-				
-				//write gets upset if >255 and need to pad 00s anyway
-				ByteBuffer bb = ByteBuffer.allocate(4);
-				bb.order(ByteOrder.LITTLE_ENDIAN);
-				byte[] lengthBytes = bb.putInt(newConvoSize).array();
-				
-				fw.write(lengthBytes);				
-				fw.write(CONVERSATIONMARKER);
-				
-				originalFileIndex += (convo.getStart() - originalFileIndex) + 8;
+				if(convo.getStart() != 0) {
+					fw.write(fullFileBytes, originalFileIndex, convo.getStart() - originalFileIndex);
+					
+					//write gets upset if >255 and need to pad 00s anyway
+					ByteBuffer bb = ByteBuffer.allocate(4);
+					bb.order(ByteOrder.LITTLE_ENDIAN);
+					byte[] lengthBytes = bb.putInt(newConvoSize).array();
+					
+					fw.write(lengthBytes);				
+					fw.write(CONVERSATIONMARKER);
+					
+					originalFileIndex += (convo.getStart() - originalFileIndex) + 8;
+				}
+				else { //for one convo files
+					fw.write(CONVERSATIONMARKER);
+					originalFileIndex += 4;
+				}
 			}
 			catch (IOException e) {
 			}
@@ -766,13 +765,60 @@ public class MainWindow extends JFrame {
 		fileListModel.clear();
 		scriptMap.clear();
 		
+		FileWriter fw;
+		PrintWriter pw;
+		List<String> list = new ArrayList<String>();
+		
 		for(File file: dir.listFiles(new BinFileFilter())) {
 			ScriptReader script = new ScriptReader(file);
 			if(script.getBlockList().size() > 0) {
 				scriptMap.put(script, file);
 				fileListModel.addElement(script);
+				
+				for(BlockData block : script.getBlockList()) {
+					if(block.getMagic() == Magic.DIALOGUE) {
+						ExtraInfoBlockData ei = (ExtraInfoBlockData) block;
+						//byte[] fourData = ei.getFourBytes();
+						//String fourDataString = String.format("%X %X %X %X", fourData[0], fourData[1], fourData[2], fourData[3]);
+						//String finalString = "";
+						//String speakerByteString = "";
+						
+						if(block.hasExtraInfo) {
+							byte[] speakerBytes = ei.getSpeakerBytes();
+							String string = String.format("%X %X %X", speakerBytes[0], speakerBytes[1], speakerBytes[2]) + " " + ei.getExtraInfoString();
+							//finalString = ei.getExtraInfoString() + " " + speakerByteString;
+							if(!list.contains(string)) {
+								list.add(string);
+							}
+						}
+						//else {
+						//	finalString = fourDataString;
+						//}
+						//if(!list.contains(finalString)) {
+						//	list.add(finalString);
+						//}
+					}
+				}
 			}
 		}
+		
+		
+		try {
+			fw = new FileWriter("output.txt");
+			pw = new PrintWriter(fw);
+			
+			for(String string : list) {
+				pw.println(string);
+			}
+			
+			pw.close();
+			fw.close();
+		}
+		catch(IOException i) {
+			
+		}
+		
+		
 		fileList.setSelectedIndex(0);
 	}
 	

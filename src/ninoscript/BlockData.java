@@ -101,12 +101,15 @@ public class BlockData {
 		private String extraInfoString = null;
 		private String newExtraInfoString;
 		
+		private byte[] speakerBytes;
+		
 		public ExtraInfoBlockData(Magic magic, int blockStart, int fullBlockLength, int textLength, int textStart,
-				int extraInfoStart, int extraInfoLength, byte[] textBytes, byte[] extraInfoBytes) {
+				int extraInfoStart, int extraInfoLength, byte[] textBytes, byte[] extraInfoBytes, byte[] speakerBytes) {
 			super(magic, blockStart, fullBlockLength, textLength, textStart, textBytes);
 			this.extraInfoStart = extraInfoStart;
 			this.extraInfoLength = extraInfoLength;
 			this.extraInfoBytes = extraInfoBytes;
+			this.speakerBytes = speakerBytes;
 			
 			try {
 				if(extraInfoBytes != null) {
@@ -146,6 +149,10 @@ public class BlockData {
 
 		public void setExtraInfoSTring(String extraInfoString) {
 			this.extraInfoString = extraInfoString;
+		}
+		
+		public byte[] getSpeakerBytes() {
+			return speakerBytes;
 		}
 	}
 }

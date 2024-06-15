@@ -60,9 +60,10 @@ public class ScriptReader {
 	private static final byte m = 0x6D;
 	private static final byte p = 0x70;
 	
+	private boolean isSingleConvo = false;
 	private String fileName;
 	private byte[] fullFileBytes;
-	private String scriptName;
+	private String scriptName = "";
 	private List<ConversationData> convoList = new ArrayList<ConversationData>();
 	private List<BlockData> blockList = new ArrayList<BlockData>();
 	
@@ -70,8 +71,14 @@ public class ScriptReader {
 	private Map<String, BlockData> existingStringMap = new HashMap<String, BlockData>();
 	private Map<String, List<BlockData>> stringListMap = new HashMap<String, List<BlockData>>();
 	
-	//TODO: need to support the 2 byte lengths properly
 	public ScriptReader(File file) {
+		int scriptNameLength = 0;
+		byte[] nameBytes = null;
+		int previousBlockCount = 0;
+		int lastBlockOfConv = 0;
+		boolean firstConvo = true;
+		BlockData data;
+		
 		try {
 			FileInputStream input = new FileInputStream(file);
 			fullFileBytes = new byte[input.available()];
@@ -86,24 +93,30 @@ public class ScriptReader {
 		}
 		
 		//magic word
-		if(fullFileBytes[0] != 0x0A && fullFileBytes[1] != 0x08 && fullFileBytes[2] != 0x1F) {
+		if(fullFileBytes[0] == 0x0A && fullFileBytes[1] == 0x08 && fullFileBytes[2] == 0x1F) {
+			
+		}
+		else if(fullFileBytes[0] == 0x0A && fullFileBytes[1] == 0x09 && fullFileBytes[2] == 0x19) {
+			isSingleConvo = true;
+		}
+		else {
 			return;
 		}
 		
 		fileName = file.getName();
-		int scriptNameLength = fullFileBytes[SCRIPTNAMEINDEX] & 0xFF;
-		byte[] nameBytes = new byte[scriptNameLength];
-		int previousBlockCount = 0;
-		int lastBlockOfConv = 0;
-		boolean firstConvo = true;
-		BlockData data;
-		for(int i = 1; i <= scriptNameLength; i++) {
-			nameBytes[i - 1] = fullFileBytes[SCRIPTNAMEINDEX + i];
-		}
-		try {
-			scriptName = new String(nameBytes, "Shift-JIS");
-		}
-		catch (UnsupportedEncodingException e) {
+		
+		if(!isSingleConvo) {
+			scriptNameLength = fullFileBytes[SCRIPTNAMEINDEX] & 0xFF;
+			nameBytes = new byte[scriptNameLength];
+			
+			for(int i = 1; i <= scriptNameLength; i++) {
+				nameBytes[i - 1] = fullFileBytes[SCRIPTNAMEINDEX + i];
+			}
+			try {
+				scriptName = new String(nameBytes, "Shift-JIS");
+			}
+			catch (UnsupportedEncodingException e) {
+			}
 		}
 		
 		for(int i = 0; i < fullFileBytes.length; i++) {
@@ -115,8 +128,12 @@ public class ScriptReader {
 				case 0x0A:
 					//these come after conversation lengths
 					if(fullFileBytes[i + 1] == 0x09 && fullFileBytes[i + 2] == 0x19 && fullFileBytes[i + 3] == 0x00) {
-						int conversationLength = fullFileBytes[i - 4] & 0xFF | (fullFileBytes[i - 3] & 0xFF) << 8 |
-							(fullFileBytes[i - 2] & 0xFF) << 16 | (fullFileBytes[i - 1] & 0xFF) << 24;
+						int conversationLength = 0;
+						
+						if(!isSingleConvo) {
+							conversationLength = fullFileBytes[i - 4] & 0xFF | (fullFileBytes[i - 3] & 0xFF) << 8 |
+								(fullFileBytes[i - 2] & 0xFF) << 16 | (fullFileBytes[i - 1] & 0xFF) << 24;
+						}
 						
 						if(!firstConvo) {
 							//not the first convo block
@@ -132,7 +149,12 @@ public class ScriptReader {
 							firstConvo = false;
 						}
 						
-						convoList.add(new ConversationData(i - 4, conversationLength, 0));
+						if(!isSingleConvo) {
+							convoList.add(new ConversationData(i - 4, conversationLength, 0));
+						}
+						else {
+							convoList.add(new ConversationData(0, conversationLength, 0));
+						}
 					}
 					break;
 				case 0x05:
@@ -291,6 +313,7 @@ public class ScriptReader {
 		byte[] speakerBytes = null;
 		int speakerLength = -1;
 		int speakerStart = -1;
+		boolean hasSpeaker = false;
 		
 		int fullBlockLength = (fullFileBytes[shift] & 0xFF) | (fullFileBytes[shift + 1] & 0xFF) << 8;
 		
@@ -308,11 +331,11 @@ public class ScriptReader {
 		for(int i = 0; i < textLength; i++) {
 			textBytes[i] = fullFileBytes[shift + i];
 		}
-		//post dialogue
-		//4D 50 00 00 = general?
-		//4D 11 00 00 = voice acted?
+		//shift += textLength;
+		//byte[] fourBytes = new byte[] {fullFileBytes[shift], fullFileBytes[shift+1], fullFileBytes[shift+2], fullFileBytes[shift+3]};
+		byte[] speakerDataBytes = null;
 		
-		
+		//shift += PADDING1;
 		shift += textLength + PADDING1;
 		//starting at this point, blocks are variable
 		
@@ -334,13 +357,19 @@ public class ScriptReader {
 						continue;
 					}
 					else {
-						byte[] check = parseSpeaker(nextByte, nextByte2, nextByte3, shift, fullFileBytes);
-						
-						if(check != null) {
-							speakerBytes = check;
-							speakerLength = nextByte2;
-							speakerStart = shift + 3;
-							shift += 3 + speakerLength;
+						if(!hasSpeaker) {
+							speakerBytes = parseSpeaker(nextByte, nextByte2, nextByte3, shift, fullFileBytes);
+							
+							if(speakerBytes != null) {
+								speakerDataBytes = new byte[] {fullFileBytes[shift], fullFileBytes[shift+1],fullFileBytes[shift+2]};
+								speakerLength = nextByte2;
+								speakerStart = shift + 3;
+								shift += 3 + speakerLength;
+								hasSpeaker = true;
+							}
+							else {
+								shift++;
+							}
 						}
 						else {
 							shift++;
@@ -355,14 +384,20 @@ public class ScriptReader {
 					//likely joint anim file
 					shift += 1 + (fullFileBytes[shift] & 0xFF);
 				}
-				else { //all we know is sub 0x0F val
-					byte[] check = parseSpeaker(nextByte, nextByte2, nextByte3, shift, fullFileBytes);
-										
-					if(check != null) {
-						speakerBytes = check;
-						speakerLength = nextByte2;
-						speakerStart = shift + 3;
-						shift += 3 + speakerLength;
+				else { //all we know is sub 0x0F 
+					if(!hasSpeaker) {
+						speakerBytes = parseSpeaker(nextByte, nextByte2, nextByte3, shift, fullFileBytes);
+						
+						if(speakerBytes != null) {
+							speakerDataBytes = new byte[] {fullFileBytes[shift], fullFileBytes[shift+1],fullFileBytes[shift+2]};
+							speakerLength = nextByte2;
+							speakerStart = shift + 3;
+							shift += 3 + speakerLength;
+							hasSpeaker = true;
+						}
+						else {
+							shift++;
+						}
 					}
 					else {
 						shift++;
@@ -374,7 +409,8 @@ public class ScriptReader {
 			}
 		}
 	
-		return new ExtraInfoBlockData(Magic.DIALOGUE, start, fullBlockLength, textLength, textStart, speakerStart, speakerLength, textBytes, speakerBytes);
+		return new ExtraInfoBlockData(Magic.DIALOGUE, start, fullBlockLength, textLength, textStart, speakerStart, speakerLength, textBytes, speakerBytes,
+				speakerDataBytes);
 	}
 	
 	private BlockData parseNonDialogue(byte[] fullFileBytes, int start) {
@@ -410,13 +446,8 @@ public class ScriptReader {
 				}
 				return speakerBytes;
 			}
-			else {
-				return null;
-			}
 		}
-		else {
-			return null;
-		}
+		return null;
 	}
 	
 	private BlockData parseTextEntry(byte[] fullFileBytes, int start) {
@@ -470,7 +501,7 @@ public class ScriptReader {
 			}
 		}
 		
-		return new ExtraInfoBlockData(magic, start, fullBlockLength, textLength, textStart, answerStart, answerLength, textBytes, answerBytes);
+		return new ExtraInfoBlockData(magic, start, fullBlockLength, textLength, textStart, answerStart, answerLength, textBytes, answerBytes, null);
 	}
 	
 	public String toString() {
