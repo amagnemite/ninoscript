@@ -131,7 +131,7 @@ public class ScriptReader {
 						int conversationLength = 0;
 						
 						if(!isSingleConvo) {
-							conversationLength = fullFileBytes[i - 4] & 0xFF | (fullFileBytes[i - 3] & 0xFF) << 8 |
+							conversationLength = (fullFileBytes[i - 4] & 0xFF) | (fullFileBytes[i - 3] & 0xFF) << 8 |
 								(fullFileBytes[i - 2] & 0xFF) << 16 | (fullFileBytes[i - 1] & 0xFF) << 24;
 						}
 						
@@ -224,16 +224,19 @@ public class ScriptReader {
 					
 					if(isCharacter(Byte.toUnsignedInt(fullFileBytes[i + 5]))) {
 						data = parseNonDialogue(fullFileBytes, i);
-						blockList.add(data);
-						checkIfStringExists(data);
-						i += data.getFullBlockLength();
-						lastBlockOfConv++;
+						if(data != null) {
+							blockList.add(data);
+							checkIfStringExists(data);
+							i += data.getFullBlockLength();
+							lastBlockOfConv++;
+						}
 					}
 					break;
 				case 0x31:
 					//text entry puzzle
-					//there seems to be two variants of this
-					//31 [2B length] 07 02 02 [answer length] 00 
+					//there seems to be three variants of this
+					//31 [2B length] 07 02 02 [answer length] 00
+					//31 [2B length] 07 02 01 [answer length] 00
 					//31 [2B length] 07 03 01 01 00 00 00 02 [answer length] 00
 					
 					if(fullFileBytes.length < i + 6) {
@@ -261,10 +264,11 @@ public class ScriptReader {
 					}
 					
 					data = parseTextEntry(fullFileBytes, i);
-					blockList.add(data);
-					i += data.getFullBlockLength();
-					lastBlockOfConv++;
-					
+					if(data != null) {
+						blockList.add(data);
+						i += data.getFullBlockLength();
+						lastBlockOfConv++;
+					}
 					break;
 				default:
 					break;
@@ -421,6 +425,10 @@ public class ScriptReader {
 		shift += 3; //skip [length1] [length2] 01
 		int textLength = fullFileBytes[shift] & 0xFF;
 		
+		if(textLength > fullBlockLength) {
+			return null;
+		}
+		
 		shift++;
 		int textStart = shift;
 		
@@ -483,6 +491,10 @@ public class ScriptReader {
 		answerLength = fullFileBytes[shift] & 0xFF;
 		shift += 2;
 		answerStart = shift;
+		
+		if(answerLength > fullBlockLength) {
+			return null;
+		}
 		
 		answerBytes = new byte[answerLength];
 		for(int i = 0; i < answerLength; i++) {

@@ -17,8 +17,10 @@ import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 
 import javax.swing.BorderFactory;
 import javax.swing.ButtonGroup;
@@ -67,6 +69,9 @@ public class MainWindow extends JFrame {
 	JMenuItem loadF12 = new JMenuItem("Load font12");
 	JButton saveFileButton = new JButton("Save changes to file");
 	
+	JMenu utilitiesMenu = new JMenu("Utilities");
+	JMenuItem findAllMatches = new JMenuItem("Find all matches");
+	
 	DefaultListModel<ScriptReader> fileListModel = new DefaultListModel<ScriptReader>();
 	SpinnerNumberModel blockSpinnerModel = new SpinnerNumberModel(0, 0, null, 1);
 	JLabel blockMaxLabel = new JLabel("of 0");
@@ -114,6 +119,9 @@ public class MainWindow extends JFrame {
 		optionsMenu.add(loadF10);
 		optionsMenu.add(loadF12);
 		menuBar.add(optionsMenu);
+		
+		utilitiesMenu.add(findAllMatches);
+		menuBar.add(utilitiesMenu);
 		setJMenuBar(menuBar);
 		
 		fileList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
@@ -297,6 +305,18 @@ public class MainWindow extends JFrame {
 			}
 		});
 		
+		findAllMatches.addActionListener(event -> {
+			JFileChooser c = new JFileChooser();
+			c.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
+			//c.setFileFilter(new BinFileFilter());
+			c.showOpenDialog(this);
+			File file = c.getSelectedFile();
+			
+			if(file != null) {
+				findAllMatches(file);
+			}
+		});
+		
 		fileList.addListSelectionListener(event -> {
 			int index = fileList.getSelectedIndex();
 			
@@ -428,7 +448,9 @@ public class MainWindow extends JFrame {
 					}
 					else {
 						if(currentFontMap != null) {
-							newLengths.setLabelText(lineChanged, newLengths.getLabelText(lineChanged) - currentFontMap.get(removedChar));
+							if(currentFontMap.containsKey(removedChar)) {
+								newLengths.setLabelText(lineChanged, newLengths.getLabelText(lineChanged) - currentFontMap.get(removedChar));
+							}
 						}
 						else {
 							newLengths.setLabelText(lineChanged, newLengths.getLabelText(lineChanged) - 1);
@@ -761,6 +783,86 @@ public class MainWindow extends JFrame {
 		fileList.setSelectedIndex(0);
 	}
 	
+	private void findAllMatches(File dir) {
+		Map<String, Map<String, List<Integer>>> textMap = new HashMap<String, Map<String, List<Integer>>>();
+		
+		FileWriter fw;
+		PrintWriter pw;
+		
+		for(File file: dir.listFiles(new BinFileFilter())) {
+			ScriptReader script = new ScriptReader(file);
+			if(script.getBlockList().size() > 0) {
+				String scriptName = script.getFileName();
+				for(int i = 0; i < script.getBlockList().size(); i++) {
+					BlockData block = script.getBlockList().get(i);
+					String text = block.getTextString();
+					Map<String, List<Integer>> scriptMap = null;
+					List<Integer> blockList = null;
+					if(!textMap.containsKey(text)) {
+						scriptMap = new HashMap<String, List<Integer>>();
+						textMap.put(text, scriptMap);
+					}
+					else {
+						scriptMap = textMap.get(text);
+					}
+					
+					if(!scriptMap.containsKey(scriptName)) {
+						blockList = new ArrayList<Integer>();
+						scriptMap.put(scriptName, blockList);
+					}
+					else {
+						blockList = scriptMap.get(scriptName);
+					}
+					
+					blockList.add(i);
+				}
+			}
+		}
+		
+		
+		try {
+			fw = new FileWriter("matching.txt");
+			pw = new PrintWriter(fw);
+			
+			for(Entry<String, Map<String, List<Integer>>> textMapEntry : textMap.entrySet()) {
+				boolean skipEntry = false;
+				
+				//if one script entry and block count == 1
+				if(textMapEntry.getValue().size() == 1) {
+					for(List<Integer> list : textMapEntry.getValue().values()) { //key doesn't matter; just interested in the list
+						if(list.size() == 1) {
+							skipEntry = true;
+						}
+					}
+				}
+				if(skipEntry) {
+					continue;
+				}
+				
+				pw.println("string: " + textMapEntry.getKey());
+				
+				for(Entry<String, List<Integer>> scriptMapEntry : textMapEntry.getValue().entrySet()) {
+					pw.print(" - " + scriptMapEntry.getKey() + ": ");
+					Iterator<Integer> iterator = scriptMapEntry.getValue().iterator();
+					
+					while(iterator.hasNext()) {
+						pw.print(iterator.next());
+						if(iterator.hasNext()) {
+							pw.print(", ");
+						}
+					}
+					pw.println();
+				}
+			}
+			
+			pw.close();
+			fw.close();
+		}
+		catch(IOException i) {
+			
+		}
+	}
+	
 	private void loadFolder(File dir) {
 		fileListModel.clear();
 		scriptMap.clear();
@@ -777,15 +879,15 @@ public class MainWindow extends JFrame {
 				
 				for(BlockData block : script.getBlockList()) {
 					if(block.getMagic() == Magic.DIALOGUE) {
-						ExtraInfoBlockData ei = (ExtraInfoBlockData) block;
+						ExtraInfoBlockData extInfo = (ExtraInfoBlockData) block;
 						//byte[] fourData = ei.getFourBytes();
 						//String fourDataString = String.format("%X %X %X %X", fourData[0], fourData[1], fourData[2], fourData[3]);
 						//String finalString = "";
 						//String speakerByteString = "";
 						
 						if(block.hasExtraInfo) {
-							byte[] speakerBytes = ei.getSpeakerBytes();
-							String string = String.format("%X %X %X", speakerBytes[0], speakerBytes[1], speakerBytes[2]) + " " + ei.getExtraInfoString();
+							byte[] speakerBytes = extInfo.getSpeakerBytes();
+							String string = String.format("%X %X %X", speakerBytes[0], speakerBytes[1], speakerBytes[2]) + " " + extInfo.getExtraInfoString();
 							//finalString = ei.getExtraInfoString() + " " + speakerByteString;
 							if(!list.contains(string)) {
 								list.add(string);
