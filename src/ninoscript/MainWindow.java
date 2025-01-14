@@ -6,7 +6,6 @@ import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
 import java.io.File;
-import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.FileWriter;
 import java.io.IOException;
@@ -34,6 +33,7 @@ import javax.swing.JList;
 import javax.swing.JMenu;
 import javax.swing.JMenuBar;
 import javax.swing.JMenuItem;
+import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JRadioButton;
 import javax.swing.JScrollPane;
@@ -50,6 +50,7 @@ import javax.swing.filechooser.FileFilter;
 import javax.swing.text.BadLocationException;
 import javax.swing.text.Document;
 
+import n2dhandler.N2D;
 import ninoscript.BlockData.*;
 import ninoscript.ScriptReader.ConversationData;
 import ninoscript.ScriptReader.Magic;
@@ -71,6 +72,7 @@ public class MainWindow extends JFrame {
 	
 	JMenu utilitiesMenu = new JMenu("Utilities");
 	JMenuItem findAllMatches = new JMenuItem("Find all matches");
+	JMenuItem generateN2DImage = new JMenuItem("Generate images from .n2d");
 	
 	DefaultListModel<ScriptReader> fileListModel = new DefaultListModel<ScriptReader>();
 	SpinnerNumberModel blockSpinnerModel = new SpinnerNumberModel(0, 0, null, 1);
@@ -121,6 +123,7 @@ public class MainWindow extends JFrame {
 		menuBar.add(optionsMenu);
 		
 		utilitiesMenu.add(findAllMatches);
+		utilitiesMenu.add(generateN2DImage);
 		menuBar.add(utilitiesMenu);
 		setJMenuBar(menuBar);
 		
@@ -264,13 +267,6 @@ public class MainWindow extends JFrame {
 			}
 		});
 		
-		/*
-		ActionListener loadFontListener = new ActionListener() {
-			public void actionPerformed(ActionEvent e) {
-				
-			}
-		}; */
-		
 		loadF10.addActionListener(event -> {
 			JFileChooser c = new JFileChooser();
 			c.showOpenDialog(this);
@@ -314,6 +310,33 @@ public class MainWindow extends JFrame {
 			
 			if(file != null) {
 				findAllMatches(file);
+			}
+		});
+		
+		generateN2DImage.addActionListener(event -> {
+			JFileChooser c = new JFileChooser();
+			c.setFileSelectionMode(JFileChooser.FILES_AND_DIRECTORIES);
+			c.setFileFilter(new N2dFileFilter());
+			c.showOpenDialog(this);
+			File targetFile = c.getSelectedFile();
+			
+			c.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
+			c.showSaveDialog(this);
+			File saveDir = c.getSelectedFile();
+			
+			if(targetFile != null) {
+				if(targetFile.isDirectory()) {
+					String filter = (String) JOptionPane.showInputDialog(this, "keyword to filter by");
+					findMatchingFiles(targetFile, saveDir, filter);
+				}
+				else {
+					try {
+						new N2D(targetFile).generateImages(saveDir);
+					}
+					catch (IOException e) {
+						
+					}
+				}
 			}
 		});
 		
@@ -477,6 +500,37 @@ public class MainWindow extends JFrame {
 		});
 	}
 	
+	private void findMatchingFiles(File parentDir, File saveDir, String filter) {
+		File[] files = parentDir.listFiles((filepath) -> {
+			if(filepath.isDirectory()) {
+				return true;
+			}
+			else {
+				if(filepath.getName().contains(filter) && filepath.getName().contains(".n2d")) {
+					return true;
+				}
+				else {
+					return false;
+				}
+			}
+		});
+		
+		for(File file : files) {
+			if(file.isDirectory()) {
+				findMatchingFiles(file, saveDir, filter);
+			}
+			else {
+				try {
+					System.out.println(file.getAbsolutePath());
+					new N2D(file).generateImages(saveDir);
+				}
+				catch (IOException e) {
+					
+				}
+			}
+		}
+	}
+	
 	private void updateTextComponents() {
 		Magic magic = currentBlock.getMagic();
 		
@@ -610,7 +664,10 @@ public class MainWindow extends JFrame {
 	}
 	
 	private void writeFile() {
-		FileOutputStream fw = null;
+		File originalFile = scriptMap.get(currentScript);
+		File tempFile;
+		File backupFile = new File(originalFile.getAbsolutePath() + ".bak");
+		FileOutputStream fw;
 		int originalFileIndex = 0;
 		byte[] fullFileBytes = currentScript.getFullFileBytes();
 		final int SPEAKERLENGTHOFFSET = -1; //one back from speaker start
@@ -620,9 +677,11 @@ public class MainWindow extends JFrame {
 		saveText();
 		
 		try {
-			fw = new FileOutputStream(scriptMap.get(currentScript));
+			tempFile = File.createTempFile(originalFile.getName(), ".tmp", originalFile.getParentFile());
+			tempFile.deleteOnExit();
+			fw = new FileOutputStream(tempFile);
 		}
-		catch (FileNotFoundException e) {
+		catch (IOException i) {
 			return;
 		}
 		
@@ -761,6 +820,12 @@ public class MainWindow extends JFrame {
 		catch (IOException e) {
 			//
 		}
+		
+		if(backupFile.exists()) {
+			backupFile.delete();
+		}
+		originalFile.renameTo(backupFile);
+		tempFile.renameTo(originalFile);
 		
 		reloadFile(scriptMap.get(currentScript));
 	}
@@ -1027,6 +1092,32 @@ public class MainWindow extends JFrame {
 
 		public String getDescription() {
 			return "Script files (.bin)";
+		}	
+	}
+	
+	public static class N2dFileFilter extends FileFilter {
+		public boolean accept(File file) {
+			if(file.isDirectory()) {
+				return true;
+			}
+			
+			String extension = file.getName();
+			int i = extension.lastIndexOf('.');
+			if (i > 0 && i < extension.length() - 1) {
+				extension = extension.substring(i+1).toLowerCase();
+	        }
+			else {
+				return false;
+			}
+			
+			if(extension.equals("n2d")) {
+				return true;
+			}
+			return false;
+		}
+
+		public String getDescription() {
+			return ".n2d";
 		}	
 	}
 }

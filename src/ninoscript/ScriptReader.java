@@ -26,6 +26,8 @@ public class ScriptReader {
 		//31 [fulllength1] [fulllength2] 07 02 02 [answerlength] 00
 		//31 [fulllength1] [fulllength2] 07 02 01 [answerlength] 00
 		//31 [fulllength1] [fulllength2] 07 03 01 01 00 00 00 02 [answerlength] 00
+		//0x11 and 0x29 might also be text
+		//0x11 is dialogue options
 		
 		private byte value;
 		private byte[] format;
