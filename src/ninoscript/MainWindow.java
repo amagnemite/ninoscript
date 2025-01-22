@@ -428,7 +428,8 @@ public class MainWindow extends JFrame {
 				int lineChanged = 0;
 				
 				if(changeLength > 1) {
-					splitString(); //if a large paste or delete happens, just resplit 
+					splitString(); //if a large paste or delete happens, just resplit
+					currentString = newText.getText();
 					return;
 				}
 				
