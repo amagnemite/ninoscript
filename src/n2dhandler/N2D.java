@@ -2,6 +2,7 @@ package n2dhandler;
 
 import java.awt.Graphics;
 import java.awt.image.BufferedImage;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
@@ -40,18 +41,23 @@ public class N2D {
 	}
 	
 	File file;
+	ByteBuffer buffer;
 	private Map<Integer, SubFile> subFiles = new HashMap<Integer, SubFile>();
 	
 	public N2D(File input) throws FileNotFoundException, IOException {
 		file = input;
 		IntFileInputStream inputStream = new IntFileInputStream(input);
+		buffer = ByteBuffer.allocate((int) input.length());
+		buffer.order(ByteOrder.LITTLE_ENDIAN);
+		inputStream.read(buffer.array());
+		inputStream.close();
 		
-		inputStream.skip(8);
-		int fileCount = inputStream.readU32();
+		buffer.position(8);
+		int fileCount = buffer.getInt();
 		
 		for(int i = 0; i < fileCount; i++) {
-			int offset = inputStream.readU32();
-			int size = inputStream.readU32();
+			int offset = buffer.getInt();
+			int size = buffer.getInt();
 			
 			if(offset == 0 || size == 0) {
 				continue;
@@ -61,7 +67,6 @@ public class N2D {
 			//use filecount over extension for the rare n2d with two tile files
 			subFiles.put(i, new SubFile(offset, size));
 		}
-		inputStream.close();
 	}
 	
 	public void generateImages(File targetDir) {
@@ -70,19 +75,10 @@ public class N2D {
 	
 	public int[][] getColors(SubFile nclr) {	
 		int[][] colorArray;
-		IntFileInputStream stream;
-		ByteBuffer buffer = ByteBuffer.allocate(nclr.size());
-		//byte[] stringBuffer = new byte[4];
-		buffer.order(ByteOrder.LITTLE_ENDIAN);
-		try {
-			stream = new IntFileInputStream(file);
-			stream.skip(nclr.offset());
-			stream.read(buffer.array());
-			stream.close();
-		}
-		catch (IOException e) {
-			return null;
-		}
+		ByteBuffer nclrBuffer = ByteBuffer.allocate(nclr.size());
+		nclrBuffer.order(ByteOrder.LITTLE_ENDIAN);
+		buffer.position(nclr.offset());
+		buffer.get(nclrBuffer.array());
 		/*
 		buffer.get(stringBuffer);
 		String headerMagic = new String(stringBuffer);
@@ -96,11 +92,11 @@ public class N2D {
 		String chunkMagic = new String(stringBuffer);
 		int chunkSize = buffer.getInt();
 		*/
-		buffer.position(24);
-		int colorDepth = buffer.getInt(); //3 = 4bpp, 4 = 8bpp
-		buffer.getInt(); //0
-		int paletteDataSize = buffer.getInt();
-		int paletteDataOffset = buffer.getInt();
+		nclrBuffer.position(24);
+		int colorDepth = nclrBuffer.getInt(); //3 = 4bpp, 4 = 8bpp
+		nclrBuffer.getInt(); //0
+		int paletteDataSize = nclrBuffer.getInt();
+		int paletteDataOffset = nclrBuffer.getInt();
 		
 		int maxColors = colorDepth == FOURBPP ? 16 : 256; //16 colors, 16 palettes or 256 colors, 1 palette
 		int colorByteSize = maxColors * 2; //4bpp = 32bytes, 8bpp = 512b?
@@ -108,7 +104,7 @@ public class N2D {
 		
 		for(int i = 0; i < colorArray.length; i++) {
 			byte[] b = new byte[paletteDataSize];
-			buffer.get(b);
+			nclrBuffer.get(b);
 			colorArray[i] = BGR555ToColor(b);
 		}
 		
@@ -129,27 +125,45 @@ public class N2D {
 		}
 		return colors;
 	}
+
+	
+	private ByteBuffer getUncompressedBuffer(int size) throws IOException {
+		ByteBuffer newBuffer;
+		buffer.mark();
+		int first = buffer.get();
+		buffer.reset();
+		
+		if(first == 0x11) { //lz11 compressed, decompress first
+			ByteArrayOutputStream output = new ByteArrayOutputStream();
+			LZ11.decode(buffer, output);
+			newBuffer = ByteBuffer.allocate(output.size());
+			newBuffer.order(ByteOrder.LITTLE_ENDIAN);
+			newBuffer.put(output.toByteArray());
+		}
+		else {
+			newBuffer = ByteBuffer.allocate(size);
+			newBuffer.order(ByteOrder.LITTLE_ENDIAN);
+			buffer.get(newBuffer.array());
+		}
+		return newBuffer;
+	}
 	
 	private List<BufferedImage> getTiles(SubFile ncgr) {
 		int[][] colorArray = getColors(subFiles.get(PALETTEVAL));
 		List<BufferedImage> tiles = new ArrayList<BufferedImage>();
-		IntFileInputStream stream;
-		ByteBuffer buffer = ByteBuffer.allocate(ncgr.size());
-		byte[] stringBuffer = new byte[4];
-		buffer.order(ByteOrder.LITTLE_ENDIAN);
+		
+		ByteBuffer ncgrBuffer;
+		buffer.position(ncgr.offset());
 		
 		try {
-			stream = new IntFileInputStream(file);
-			stream.skip(ncgr.offset());
-			stream.read(buffer.array());
-			stream.close();
+			ncgrBuffer = getUncompressedBuffer(ncgr.size());
 		}
 		catch (IOException e) {
 			return null;
 		}
 		
+		/*
 		buffer.get(stringBuffer);
-		String headerMagic = new String(stringBuffer);
 		int byteOrder = buffer.getShort();
 		int version = buffer.getShort();
 		int fileSize = buffer.getInt();
@@ -157,24 +171,29 @@ public class N2D {
 		int chunkCount = buffer.getShort();
 		
 		buffer.get(stringBuffer);
-		String chunkMagic = new String(stringBuffer);
 		int chunkSize = buffer.getInt();
-		int yPixelCount = buffer.getShort(); //these could also be interpreted as tileCount?
-		int xPixelCount = buffer.getShort();
-		int colorDepth = buffer.getInt();
-		int unknown1 = buffer.getShort();
-		int unknown2 = buffer.getShort();
-		int tiledFlag = buffer.getInt();
+		*/
+		ncgrBuffer.position(24);
+		
+		int yPixelCount = ncgrBuffer.getShort(); //these could also be interpreted as tileCount?
+		int xPixelCount = ncgrBuffer.getShort();
+		int colorDepth = ncgrBuffer.getInt(); //3 = 4bpp, 4 = 8bpp
+		//int unknown1 = buffer.getShort();
+		//int unknown2 = buffer.getShort();	
+		ncgrBuffer.position(ncgrBuffer.position() + 4);
+		
+		int tiledFlag = ncgrBuffer.getInt();
 		TileOrder order = (tiledFlag & 0xFF) == 0 ? TileOrder.HORIZONTAL : TileOrder.LINEAL;
 		if(order == TileOrder.LINEAL) {
 			System.out.println(file + " is lineal");
 		}
 		
-		int tileDataSize = buffer.getInt();
-		int tileDataOffset = buffer.getInt();
-		//buffer.get(0x18 + tileDataOffset); //start of RAHC + 8 + paletteDataOffset
+		int tileDataSize = ncgrBuffer.getInt();
+		ncgrBuffer.position(ncgrBuffer.position() + 4);
+		//int tileDataOffset = ncgrBuffer.getInt();
+		
 		byte[] tileData = new byte[tileDataSize];
-		buffer.get(tileData);
+		ncgrBuffer.get(tileData);
 		
 		if(xPixelCount != 0xFFFF) {
 			xPixelCount *= 8;
@@ -185,13 +204,16 @@ public class N2D {
 		//byte[] tilePalette = new byte[tileData.length * (TILESIZE / bpp)];
 		
 		int pixelCount = tileDataSize * 8 / bpp; //# of bits / bits per pixel
-		if(Math.pow(Math.sqrt(pixelCount), 2) == pixelCount) { //checking if it's a square
+		
+		/*
+		if(Math.pow((int) Math.sqrt(pixelCount), 2) == pixelCount) { //checking if it's a square
 			xPixelCount = yPixelCount = (int) Math.sqrt(pixelCount);
 		}
-		else {
+		else { //this needs to be replaced for tile layouts, since not all pixelcounts support 256w
 			xPixelCount = pixelCount > 256 ? 256 : pixelCount;
 			yPixelCount = pixelCount / xPixelCount;
 		}
+		*/
 		
 		//BufferedImage image = new BufferedImage(xPixelCount, yPixelCount, BufferedImage.TYPE_INT_ARGB);
 		colorArray[0][0] = 0; //color 0 is generally meant to be transparent
@@ -213,6 +235,14 @@ public class N2D {
 		}
 		
 		int index = 0;
+		int tileCount = pixelCount / (TILESIZE * TILESIZE);
+		for(int i = 0; i < tileCount; i++) {
+			BufferedImage tile = new BufferedImage(TILESIZE, TILESIZE, BufferedImage.TYPE_INT_ARGB);
+			tile.setRGB(0, 0, TILESIZE, TILESIZE, pixels, index, TILESIZE);
+			tiles.add(tile);
+			index += TILESIZE * TILESIZE;
+		}
+		/*
 		for(int h = 0; h < yPixelCount / TILESIZE; h++) {
 			for(int w = 0; w < xPixelCount / TILESIZE; w++) {
 				BufferedImage tile = new BufferedImage(TILESIZE, TILESIZE, BufferedImage.TYPE_INT_ARGB);
@@ -222,25 +252,22 @@ public class N2D {
 				index += TILESIZE * TILESIZE;
 			}
 		}
-		
+		*/
 		return tiles;
 	}
 	
 	private void getCells(File targetDir, SubFile ncer) {
 		List<BufferedImage> tiles = getTiles(subFiles.get(TILEONEVAL));
 		List<Bank> banks = new ArrayList<Bank>();
-		IntFileInputStream stream;
-		ByteBuffer buffer = ByteBuffer.allocate(ncer.size());
-		//byte[] stringBuffer = new byte[4];
-		buffer.order(ByteOrder.LITTLE_ENDIAN);
+		
+		ByteBuffer ncerBuffer;
+		buffer.position(ncer.offset());
+		
 		try {
-			stream = new IntFileInputStream(file);
-			stream.skip(ncer.offset());
-			stream.read(buffer.array());
-			stream.close();
+			ncerBuffer = getUncompressedBuffer(ncer.size());
 		}
 		catch (IOException e) {
-			//return null;
+			return;
 		}
 		
 		/*
@@ -255,11 +282,11 @@ public class N2D {
 		String chunkMagic = new String(stringBuffer);
 		int chunkSize = buffer.getInt();
 		*/
-		buffer.position(24);
+		ncerBuffer.position(24);
 		
-		int metatileCount = buffer.getShort();
-		int metatileEntrySize = buffer.getShort(); //0 = 8 bytes, 1 = 16 bytes
-		buffer.position(buffer.position() + 20);
+		int metatileCount = ncerBuffer.getShort();
+		int metatileEntrySize = ncerBuffer.getShort(); //0 = 8 bytes, 1 = 16 bytes
+		ncerBuffer.position(ncerBuffer.position() + 20);
 		
 		/*
 		int metatileOffset = buffer.getInt();
@@ -268,37 +295,38 @@ public class N2D {
 		*/
 		
 		//starting here is the metatile table
-		int cellTablePos = buffer.position() + metatileCount * (metatileEntrySize * 8 + 8);
+		int cellTablePos = ncerBuffer.position() + metatileCount * (metatileEntrySize * 8 + 8);
 		
 		for(int i = 0; i < metatileCount; i++) {
-			int objCount = buffer.getShort();
-			buffer.getShort(); //read only data
-			int objOffset = buffer.getInt();
+			int objCount = ncerBuffer.getShort();
+			ncerBuffer.getShort(); //read only data
+			int objOffset = ncerBuffer.getInt();
 			
-			if(metatileEntrySize == 0x01) {
-				buffer.position(buffer.position() + 8);
+			if(metatileEntrySize == 0x01) { //0x01 has 8 extra bytes of data
+				ncerBuffer.position(ncerBuffer.position() + 8);
 			}
 			banks.add(new Bank(objCount, objOffset));
-			buffer.mark();
-			buffer.position(cellTablePos + objOffset);
+			ncerBuffer.mark();
+			ncerBuffer.position(cellTablePos + objOffset);
 			
 			BufferedImage image = new BufferedImage(512, 256, BufferedImage.TYPE_INT_ARGB);
 			Graphics g = image.getGraphics();
 			for(int j = 0; j < objCount; j++) { //iterate through the objs
-				byte yPos = buffer.get();
-				int obj1TopHalf = buffer.get() & 0xFF;
+				//x and y pos use signed ints
+				byte yPos = ncerBuffer.get();
+				int obj1TopHalf = ncerBuffer.get() & 0xFF;
 				
 				int paletteMode = (obj1TopHalf >> 5) & 0x1;
 				int objShape = obj1TopHalf >> 6;
 				
-				int xPos = Byte.valueOf(buffer.get()).intValue(); //i love signed ints
+				int xPos = Byte.valueOf(ncerBuffer.get()).intValue(); //i love signed ints
 				xPos = xPos < 0 ? xPos * -1 : xPos;
-				int obj2TopHalf = buffer.get() & 0xFF;
+				int obj2TopHalf = ncerBuffer.get() & 0xFF;
 				
-				int isXPosNegative = obj2TopHalf & 0x1;
+				boolean isXPosNegative = (obj2TopHalf & 0x1) == 0x1 ? true : false; //100-1FF = left of screen, <= 0FF = right
 				int objSize = obj2TopHalf >> 6;
 				
-				int obj3 = buffer.getShort();
+				int obj3 = ncerBuffer.getShort();
 				int tileNumber = obj3 & 0x1FF;
 				
 				int tileIterate = paletteMode == 0x1 ? tileNumber * 2 : tileNumber; //only even tiles are allowed in 256 color mode
@@ -306,7 +334,7 @@ public class N2D {
 				for(int h = 0; h < size.height() / TILESIZE; h++) {
 					for(int w = 0; w < size.width() / TILESIZE; w++) {
 						int y = 128 + yPos + TILESIZE * h;
-						int x = isXPosNegative == 0x1 ? 256 - xPos : 256 + xPos;
+						int x = isXPosNegative ? 256 - xPos : 256 + xPos;
 						x += TILESIZE * w;
 						
 						g.drawImage(tiles.get(tileIterate), x, y, null);
@@ -325,7 +353,7 @@ public class N2D {
 			}
 			g.dispose();
 			
-			buffer.reset();
+			ncerBuffer.reset();
 		}
 	}
 	

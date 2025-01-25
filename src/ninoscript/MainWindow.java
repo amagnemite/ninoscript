@@ -325,6 +325,10 @@ public class MainWindow extends JFrame {
 			File saveDir = c.getSelectedFile();
 			
 			if(targetFile != null) {
+				if(saveDir == null) {
+					saveDir = targetFile.getParentFile();
+				}
+				
 				if(targetFile.isDirectory()) {
 					String filter = (String) JOptionPane.showInputDialog(this, "keyword to filter by");
 					findMatchingFiles(targetFile, saveDir, filter);
