@@ -18,7 +18,7 @@ public class LZ11 {
 			//input.close();
 			return;
 		}
-		int decompressedSize = header[1] | header[2] << 8 | header[3] << 16;
+		int decompressedSize = (header[1] & 0xFF) | (header[2] & 0xFF) << 8 | (header[3] & 0xFF) << 16;
 		
 		byte[] buffer = new byte[BUFFERLENGTH];
 		int bufferOffset = 0;

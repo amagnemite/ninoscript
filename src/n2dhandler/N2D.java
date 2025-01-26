@@ -9,9 +9,11 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 
 import javax.imageio.ImageIO;
 
@@ -73,7 +75,7 @@ public class N2D {
 		getCells(targetDir, subFiles.get(CELLVAL));
 	}
 	
-	public int[][] getColors(SubFile nclr) {	
+	public int[][] getColors(SubFile nclr) {
 		int[][] colorArray;
 		ByteBuffer nclrBuffer = ByteBuffer.allocate(nclr.size());
 		nclrBuffer.order(ByteOrder.LITTLE_ENDIAN);
@@ -94,26 +96,37 @@ public class N2D {
 		*/
 		nclrBuffer.position(24);
 		int colorDepth = nclrBuffer.getInt(); //3 = 4bpp, 4 = 8bpp
-		nclrBuffer.getInt(); //0
-		int paletteDataSize = nclrBuffer.getInt();
-		int paletteDataOffset = nclrBuffer.getInt();
+		nclrBuffer.position(nclrBuffer.position() + 4);
+		int totalPaletteDataSize = nclrBuffer.getInt(); //always 512
+		nclrBuffer.position(nclrBuffer.position() + 4);
+		//int paletteDataOffset = nclrBuffer.getInt();
 		
-		int maxColors = colorDepth == FOURBPP ? 16 : 256; //16 colors, 16 palettes or 256 colors, 1 palette
-		int colorByteSize = maxColors * 2; //4bpp = 32bytes, 8bpp = 512b?
-		colorArray = new int[paletteDataSize / colorByteSize][];
+		int colorsPerPalette = colorDepth == FOURBPP ? 16 : 256; //16 colors, 16 palettes or 256 colors, 1 palette
+		int colorByteSize = colorsPerPalette * 2; //4bpp = 32bytes, 8bpp = 512b?
+		colorArray = new int[totalPaletteDataSize / colorByteSize][];
 		
-		for(int i = 0; i < colorArray.length; i++) {
-			byte[] b = new byte[paletteDataSize];
-			nclrBuffer.get(b);
-			colorArray[i] = BGR555ToColor(b);
+		byte[] b = new byte[totalPaletteDataSize];
+		nclrBuffer.get(b);
+		int[] allColors = BGR555ToColor(b); //get all the colors at once, then break it up if 4bpp
+		
+		if(colorDepth == FOURBPP) {
+			int index = 0;
+			for(int i = 0; i < colorArray.length; i++) {
+				colorArray[i] = Arrays.copyOfRange(allColors, index, index + 16);
+			}
+			index += 16;
+		}
+		else {
+			colorArray[0] = allColors;
 		}
 		
 		return colorArray;
 	}
 	
 	private int[] BGR555ToColor(byte[] bytes) {
-		int[] colors = new int[bytes.length / 2];
-		for(int i = 0; i < bytes.length / 2; i++) {
+		final int TOTALCOLORS = 256;
+		int[] colors = new int[TOTALCOLORS];
+		for(int i = 0; i < TOTALCOLORS; i++) {
 			int twoByte = (bytes[i * 2] & 0xFF) | (bytes[i * 2 + 1] & 0xFF) << 8;
 			
 			int r = (twoByte & 0x1F) * 255 / 31;
@@ -148,10 +161,9 @@ public class N2D {
 		return newBuffer;
 	}
 	
-	private List<BufferedImage> getTiles(SubFile ncgr) {
+	private Map<Integer, List<BufferedImage>> getTiles(SubFile ncgr) {
 		int[][] colorArray = getColors(subFiles.get(PALETTEVAL));
-		List<BufferedImage> tiles = new ArrayList<BufferedImage>();
-		
+		Map<Integer, List<BufferedImage>> tileLists = new HashMap<Integer, List<BufferedImage>>();
 		ByteBuffer ncgrBuffer;
 		buffer.position(ncgr.offset());
 		
@@ -201,8 +213,6 @@ public class N2D {
 		}
 		
 		int bpp = colorDepth == FOURBPP ? 4 : 8;
-		//byte[] tilePalette = new byte[tileData.length * (TILESIZE / bpp)];
-		
 		int pixelCount = tileDataSize * 8 / bpp; //# of bits / bits per pixel
 		
 		/*
@@ -210,8 +220,18 @@ public class N2D {
 			xPixelCount = yPixelCount = (int) Math.sqrt(pixelCount);
 		}
 		else { //this needs to be replaced for tile layouts, since not all pixelcounts support 256w
-			xPixelCount = pixelCount > 256 ? 256 : pixelCount;
-			yPixelCount = pixelCount / xPixelCount;
+			for(int i = 256; i > 0; i - 8) {
+				if(pixelCount < i) {
+					continue;
+				}
+			
+				int side = pixelCount / i;
+				if(side % 8 == 0) {
+					xPixelCount = side > i ? side : i;
+					yPixelCount = side > i ? i : side;
+					break;
+				}
+			}
 		}
 		*/
 		
@@ -220,28 +240,48 @@ public class N2D {
 		
 		int[] pixels;
 		if(colorDepth == FOURBPP) {
-			pixels = new int[tileData.length * 2];
-			for(int i = 0; i < tileData.length; i++) {
-				int curByte = tileData[i] & 0xFF;
-				pixels[i * 2] = colorArray[curByte & 0xC0][curByte & 0x30];
-				pixels[i * 2 + 1] = colorArray[curByte & 0xC][curByte & 0x3];
+			System.out.println("is 4bpp");
+			List<Integer> uniquePalettes = new ArrayList<Integer>();
+			
+			for(int k = 0; k < 16; k++) {
+				if(uniquePalettes.size() != 0) {
+					boolean notUnique = false;
+					for(Integer uniquePalette : uniquePalettes) {
+						if(Arrays.equals(colorArray[k], colorArray[uniquePalette])) {
+							tileLists.put(k, tileLists.get(uniquePalette));
+							notUnique = true;
+							break;
+						}
+					}
+					if(notUnique) {
+						continue;
+					}
+				}
+				
+				pixels = new int[tileData.length * 2];
+				for(int i = 0; i < tileData.length; i++) {
+					int curByte = tileData[i] & 0xFF;
+					pixels[i * 2] = colorArray[k][curByte & 0xF];
+					pixels[i * 2 + 1] = colorArray[k][curByte >> 4];
+				}
+				
+				List<BufferedImage> tiles = new ArrayList<BufferedImage>();
+				tileLists.put(k, tiles);
+				uniquePalettes.add(k);
+				makeTile(pixelCount, pixels, tiles);
 			}
 		}
 		else {
 			pixels = new int[tileData.length];
 			for(int i = 0; i < tileData.length; i++) {
-				pixels[i] = colorArray[0][tileData[i]];
+				pixels[i] = colorArray[0][tileData[i] & 0xFF];
 			}
+			
+			List<BufferedImage> tiles = new ArrayList<BufferedImage>();
+			tileLists.put(0, tiles);
+			makeTile(pixelCount, pixels, tiles);
 		}
 		
-		int index = 0;
-		int tileCount = pixelCount / (TILESIZE * TILESIZE);
-		for(int i = 0; i < tileCount; i++) {
-			BufferedImage tile = new BufferedImage(TILESIZE, TILESIZE, BufferedImage.TYPE_INT_ARGB);
-			tile.setRGB(0, 0, TILESIZE, TILESIZE, pixels, index, TILESIZE);
-			tiles.add(tile);
-			index += TILESIZE * TILESIZE;
-		}
 		/*
 		for(int h = 0; h < yPixelCount / TILESIZE; h++) {
 			for(int w = 0; w < xPixelCount / TILESIZE; w++) {
@@ -253,11 +293,22 @@ public class N2D {
 			}
 		}
 		*/
-		return tiles;
+		return tileLists;
+	}
+	
+	private void makeTile(int pixelCount, int[] pixels, List<BufferedImage> tiles) {
+		int tileCount = pixelCount / (TILESIZE * TILESIZE);
+		int index = 0;
+		for(int i = 0; i < tileCount; i++) {
+			BufferedImage tile = new BufferedImage(TILESIZE, TILESIZE, BufferedImage.TYPE_INT_ARGB);
+			tile.setRGB(0, 0, TILESIZE, TILESIZE, pixels, index, TILESIZE);
+			tiles.add(tile);
+			index += TILESIZE * TILESIZE;
+		}
 	}
 	
 	private void getCells(File targetDir, SubFile ncer) {
-		List<BufferedImage> tiles = getTiles(subFiles.get(TILEONEVAL));
+		Map<Integer, List<BufferedImage>> tileLists = getTiles(subFiles.get(TILEONEVAL));
 		List<Bank> banks = new ArrayList<Bank>();
 		
 		ByteBuffer ncerBuffer;
@@ -316,6 +367,7 @@ public class N2D {
 				byte yPos = ncerBuffer.get();
 				int obj1TopHalf = ncerBuffer.get() & 0xFF;
 				
+				int rotationScalingFlag = obj1TopHalf & 0x1;
 				int paletteMode = (obj1TopHalf >> 5) & 0x1;
 				int objShape = obj1TopHalf >> 6;
 				
@@ -325,19 +377,43 @@ public class N2D {
 				
 				boolean isXPosNegative = (obj2TopHalf & 0x1) == 0x1 ? true : false; //100-1FF = left of screen, <= 0FF = right
 				int objSize = obj2TopHalf >> 6;
+				int isHorizontalFlip = 0;
+				int isVerticalFlip = 0;
 				
-				int obj3 = ncerBuffer.getShort();
+				if(rotationScalingFlag == 0) {
+					isHorizontalFlip = (obj2TopHalf >> 4) & 0x1;
+					isVerticalFlip = (obj2TopHalf >> 5) & 0x1;
+				}
+				
+				int obj3 = (ncerBuffer.get() & 0xFF) | (ncerBuffer.get() & 0xFF) << 8;
 				int tileNumber = obj3 & 0x1FF;
+				int paletteNumber = obj3 >> 12;
 				
-				int tileIterate = paletteMode == 0x1 ? tileNumber * 2 : tileNumber; //only even tiles are allowed in 256 color mode
 				Size size = OBJSIZES[objShape][objSize];
+				List<BufferedImage> tiles = tileLists.get(paletteNumber);
+				int tileIterate = paletteMode == 0x1 ? tileNumber * 2 : tileNumber * 4; //only even tiles are allowed in 256 color mode
+				//not sure what's up with 16/16 tiles
+				
 				for(int h = 0; h < size.height() / TILESIZE; h++) {
 					for(int w = 0; w < size.width() / TILESIZE; w++) {
 						int y = 128 + yPos + TILESIZE * h;
 						int x = isXPosNegative ? 256 - xPos : 256 + xPos;
 						x += TILESIZE * w;
 						
-						g.drawImage(tiles.get(tileIterate), x, y, null);
+						if(isHorizontalFlip == 0x1 || isVerticalFlip == 0x1) {
+							int[] originalPixels = new int[TILESIZE * TILESIZE];
+							int[] newPixels = new int[TILESIZE * TILESIZE];
+							
+							tiles.get(tileIterate).getRGB(0, 0, TILESIZE, TILESIZE, originalPixels, 0, TILESIZE);
+							if(isHorizontalFlip == 1) {
+								for(int k = 0; k < originalPixels.length; k++) {
+									newPixels[k] = originalPixels[k + (7 - (k % 7)) ];
+								}
+							}
+						}
+						else {
+							g.drawImage(tiles.get(tileIterate), x, y, null);
+						}
 						
 						tileIterate++;
 					}
