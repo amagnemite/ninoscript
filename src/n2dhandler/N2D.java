@@ -240,7 +240,6 @@ public class N2D {
 		
 		int[] pixels;
 		if(colorDepth == FOURBPP) {
-			System.out.println("is 4bpp");
 			List<Integer> uniquePalettes = new ArrayList<Integer>();
 			
 			for(int k = 0; k < 16; k++) {
@@ -386,33 +385,36 @@ public class N2D {
 				}
 				
 				int obj3 = (ncerBuffer.get() & 0xFF) | (ncerBuffer.get() & 0xFF) << 8;
-				int tileNumber = obj3 & 0x1FF;
+				int tileNumber = obj3 & 0x3FF;
 				int paletteNumber = obj3 >> 12;
 				
 				Size size = OBJSIZES[objShape][objSize];
 				List<BufferedImage> tiles = tileLists.get(paletteNumber);
 				int tileIterate = paletteMode == 0x1 ? tileNumber * 2 : tileNumber * 4; //only even tiles are allowed in 256 color mode
 				//not sure what's up with 16/16 tiles
+				int maxVerticalTiles = size.height() / TILESIZE;
+				int maxHorizontalTiles = size.width() / TILESIZE;
 				
-				for(int h = 0; h < size.height() / TILESIZE; h++) {
-					for(int w = 0; w < size.width() / TILESIZE; w++) {
-						int y = 128 + yPos + TILESIZE * h;
+				for(int h = 0; h < maxVerticalTiles; h++) {
+					for(int w = 0; w < maxHorizontalTiles; w++) {
+						//int y = 128 + yPos + TILESIZE * h;
+						int y = 128 + yPos;
 						int x = isXPosNegative ? 256 - xPos : 256 + xPos;
-						x += TILESIZE * w;
+						//x += TILESIZE * w;
+						BufferedImage tile = tiles.get(tileIterate);
 						
 						if(isHorizontalFlip == 0x1 || isVerticalFlip == 0x1) {
-							int[] originalPixels = new int[TILESIZE * TILESIZE];
-							int[] newPixels = new int[TILESIZE * TILESIZE];
+							y = isVerticalFlip == 1 ? y + TILESIZE * (maxVerticalTiles - h) : y + TILESIZE * h;
+							x = isHorizontalFlip == 1 ? x + TILESIZE * (maxHorizontalTiles - w) : x + TILESIZE * w;
 							
-							tiles.get(tileIterate).getRGB(0, 0, TILESIZE, TILESIZE, originalPixels, 0, TILESIZE);
-							if(isHorizontalFlip == 1) {
-								for(int k = 0; k < originalPixels.length; k++) {
-									newPixels[k] = originalPixels[k + (7 - (k % 7)) ];
-								}
-							}
+							g.drawImage(tile, x, y,
+									(1 - isHorizontalFlip * 2) * TILESIZE, (1 - isVerticalFlip * 2) * TILESIZE, null);
 						}
 						else {
-							g.drawImage(tiles.get(tileIterate), x, y, null);
+							y += TILESIZE * h;
+							x += TILESIZE * w;
+							
+							g.drawImage(tile, x, y, null);
 						}
 						
 						tileIterate++;
