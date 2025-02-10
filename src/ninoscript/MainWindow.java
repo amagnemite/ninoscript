@@ -26,6 +26,7 @@ import javax.swing.ButtonGroup;
 import javax.swing.DefaultListModel;
 import javax.swing.DefaultListSelectionModel;
 import javax.swing.JButton;
+import javax.swing.JCheckBox;
 import javax.swing.JFileChooser;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
@@ -86,6 +87,7 @@ public class MainWindow extends JFrame {
 	JList<Integer> newTextLenLists = new JList<Integer>();
 	JTextField originalExtraField = new JTextField(10);
 	JTextField newExtraField = new JTextField(10);
+	JCheckBox scriptingCheck = new JCheckBox("Hide extra text data");
 	
 	ButtonGroup fontGroup = new ButtonGroup();
 	JRadioButton f10Button = new JRadioButton("font10");
@@ -99,6 +101,7 @@ public class MainWindow extends JFrame {
 	
 	private boolean isSpeakerBorder = true;
 	private boolean setText = true;
+	private boolean hideScriptingInfo = false;
 	
 	private Map<String, Integer> currentFontMap = null;
 	private Map<String, Integer> font10Map = null;
@@ -217,15 +220,17 @@ public class MainWindow extends JFrame {
 		gbcon.gridheight = 1;
 		
 		gbcon.anchor = GridBagConstraints.WEST;
-		addGB(blockPanel, 1, 0);
-		addGB(buttonPanel, 2, 0);
+		addGB(blockPanel, GridBagConstraints.RELATIVE, 0);
+		addGB(buttonPanel, GridBagConstraints.RELATIVE, 0);
+		
+		addGB(scriptingCheck, GridBagConstraints.RELATIVE, 0);
 		
 		gbcon.gridwidth = 2;
 		addGB(originalTextPanel, 1, 1);
-		addGB(newTextPanel, 1, 2);
+		addGB(newTextPanel, 1, GridBagConstraints.RELATIVE);
 		
 		gbcon.gridwidth = 1;
-		addGB(saveFileButton, 1, 3);
+		addGB(saveFileButton, 1, GridBagConstraints.RELATIVE);
 		
 		gbcon.anchor = GridBagConstraints.NORTHWEST;
 		addGB(originalExtraPanel, 3, 1);
@@ -490,6 +495,11 @@ public class MainWindow extends JFrame {
 			}
 		});
 		
+		scriptingCheck.addItemListener(event -> {
+			hideScriptingInfo = scriptingCheck.isSelected();
+			updateTextComponents();
+		});
+		
 		saveFileButton.addActionListener(event -> {
 			writeFile();
 		});
@@ -539,7 +549,43 @@ public class MainWindow extends JFrame {
 	private void updateTextComponents() {
 		Magic magic = currentBlock.getMagic();
 		
-		originalText.setText(currentBlock.getTextString());
+		if(!hideScriptingInfo) {
+			originalText.setText(currentBlock.getTextString());
+		}
+		else {
+			String string = currentBlock.getTextString();
+			String newString = null;
+			int stringIndex = 0;
+			
+			while(stringIndex != -1) { //furigana first
+				stringIndex = string.indexOf('<');
+				int colonIndex = string.indexOf(':');
+				
+				if(stringIndex != -1) {
+					newString = string.substring(stringIndex + 1, colonIndex) + string.substring(string.indexOf('>') + 1);
+					if(stringIndex != 0) { //if first char isn't <, append the extra chars
+						newString = string.substring(0, stringIndex) + newString;
+					}
+					string = newString;
+				}
+			}
+			stringIndex = 0;
+			while(stringIndex != -1) { //furigana first
+				stringIndex = string.indexOf('}'); //end of first bit, eg {3:4}
+				int openBraceIndex = string.indexOf('{', stringIndex); //opening of second bit, {1:2}
+				int closeBraceIndex = string.indexOf('}', openBraceIndex);
+				if(stringIndex != -1) {
+					newString = string.substring(stringIndex + 1, openBraceIndex) + string.substring(closeBraceIndex + 1);
+					
+					if(stringIndex != 0) {
+						newString = string.substring(0, stringIndex) + newString;
+					}
+					string = newString;
+				}
+			}
+			originalText.setText(string);
+		}
+		
 		newText.setText(currentBlock.getNewTextString());
 		
 		if(currentBlock.hasExtraInfo()) {
