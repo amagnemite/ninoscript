@@ -52,9 +52,9 @@ import javax.swing.text.BadLocationException;
 import javax.swing.text.Document;
 
 import n2dhandler.N2D;
-import ninoscript.BlockData.*;
-import ninoscript.ScriptReader.ConversationData;
-import ninoscript.ScriptReader.Magic;
+import ninoscript.ConvoData.*;
+import ninoscript.ScriptParser.ConversationData;
+import ninoscript.ScriptParser.ConvoMagic;
 
 @SuppressWarnings("serial")
 public class MainWindow extends JFrame {
@@ -75,11 +75,11 @@ public class MainWindow extends JFrame {
 	JMenuItem findAllMatches = new JMenuItem("Find all matches");
 	JMenuItem generateN2DImage = new JMenuItem("Generate images from .n2d");
 	
-	DefaultListModel<ScriptReader> fileListModel = new DefaultListModel<ScriptReader>();
+	DefaultListModel<ScriptParser> fileListModel = new DefaultListModel<ScriptParser>();
 	SpinnerNumberModel blockSpinnerModel = new SpinnerNumberModel(0, 0, null, 1);
 	JLabel blockMaxLabel = new JLabel("of 0");
 	
-	JList<ScriptReader> fileList = new JList<ScriptReader>(fileListModel);
+	JList<ScriptParser> fileList = new JList<ScriptParser>(fileListModel);
 	JSpinner blockSpinner = new JSpinner(blockSpinnerModel);
 	JTextArea originalText = new JTextArea(6, 35);
 	JList<Integer> originalTextLenLists = new JList<Integer>();
@@ -107,9 +107,9 @@ public class MainWindow extends JFrame {
 	private Map<String, Integer> font10Map = null;
 	private Map<String, Integer> font12Map = null;
 	
-	private Map<ScriptReader, File> scriptMap = new HashMap<ScriptReader, File>();
-	private ScriptReader currentScript = null;
-	private BlockData currentBlock;
+	private Map<ScriptParser, File> scriptMap = new HashMap<ScriptParser, File>();
+	private ScriptParser currentScript = null;
+	private ConvoData currentBlock;
 	private String currentString;
 	private List<Integer> newLineLocs = new ArrayList<Integer>();
 	
@@ -326,6 +326,7 @@ public class MainWindow extends JFrame {
 			File targetFile = c.getSelectedFile();
 			
 			c.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
+			c.setFileFilter(null);
 			c.showSaveDialog(this);
 			File saveDir = c.getSelectedFile();
 			
@@ -354,11 +355,11 @@ public class MainWindow extends JFrame {
 			
 			if(index != -1) {
 				if(currentScript != null) {
-					for(BlockData block : currentScript.getBlockList()) {
+					for(ConvoData block : currentScript.getBlockList()) {
 						//wipes any new stuff that wasn't saved to file
 						block.setNewTextString(block.getTextString());
 						if(block.hasExtraInfo()) {
-							((ExtraInfoBlockData) block).setNewExtraInfoString(((ExtraInfoBlockData) block).getExtraInfoString());
+							((ExtraInfoConvoData) block).setNewExtraInfoString(((ExtraInfoConvoData) block).getExtraInfoString());
 						}
 					}
 				}
@@ -547,7 +548,7 @@ public class MainWindow extends JFrame {
 	}
 	
 	private void updateTextComponents() {
-		Magic magic = currentBlock.getMagic();
+		ConvoMagic magic = currentBlock.getMagic();
 		
 		if(!hideScriptingInfo) {
 			originalText.setText(currentBlock.getTextString());
@@ -559,7 +560,7 @@ public class MainWindow extends JFrame {
 			
 			while(stringIndex != -1) { //furigana first
 				stringIndex = string.indexOf('<');
-				int colonIndex = string.indexOf(':');
+				int colonIndex = string.indexOf(':', stringIndex);
 				
 				if(stringIndex != -1) {
 					newString = string.substring(stringIndex + 1, colonIndex) + string.substring(string.indexOf('>') + 1);
@@ -570,12 +571,11 @@ public class MainWindow extends JFrame {
 				}
 			}
 			stringIndex = 0;
-			while(stringIndex != -1) { //furigana first
-				stringIndex = string.indexOf('}'); //end of first bit, eg {3:4}
-				int openBraceIndex = string.indexOf('{', stringIndex); //opening of second bit, {1:2}
-				int closeBraceIndex = string.indexOf('}', openBraceIndex);
+			while(stringIndex != -1) { //does opening and closing color tags separately
+				stringIndex = string.indexOf('{'); //
+				int closeBraceIndex = string.indexOf('}', stringIndex);
 				if(stringIndex != -1) {
-					newString = string.substring(stringIndex + 1, openBraceIndex) + string.substring(closeBraceIndex + 1);
+					newString = string.substring(closeBraceIndex + 1);
 					
 					if(stringIndex != 0) {
 						newString = string.substring(0, stringIndex) + newString;
@@ -589,12 +589,12 @@ public class MainWindow extends JFrame {
 		newText.setText(currentBlock.getNewTextString());
 		
 		if(currentBlock.hasExtraInfo()) {
-			originalExtraField.setText(((ExtraInfoBlockData) currentBlock).getExtraInfoString());
-			newExtraField.setText(((ExtraInfoBlockData) currentBlock).getNewExtraInfoString());
+			originalExtraField.setText(((ExtraInfoConvoData) currentBlock).getExtraInfoString());
+			newExtraField.setText(((ExtraInfoConvoData) currentBlock).getNewExtraInfoString());
 			newExtraField.setEnabled(true);
 			
-			if(isSpeakerBorder && (magic == Magic.TEXTENTRY || magic == Magic.TEXTENTRYLONG ||
-					magic == Magic.TEXTENTRYNODESCRIPT)) {
+			if(isSpeakerBorder && (magic == ConvoMagic.TEXTENTRY || magic == ConvoMagic.TEXTENTRYLONG ||
+					magic == ConvoMagic.TEXTENTRYNODESCRIPT)) {
 				originalExtraPanel.setBorder(BorderFactory.createTitledBorder(ORIGINALANSWER));
 				newExtraPanel.setBorder(BorderFactory.createTitledBorder(NEWANSWER));
 				isSpeakerBorder = false;
@@ -614,7 +614,7 @@ public class MainWindow extends JFrame {
 			newExtraField.setEnabled(false);
 		}
 		
-		if(magic == Magic.TEXTENTRYNODESCRIPT) {
+		if(magic == ConvoMagic.TEXTENTRYNODESCRIPT) {
 			newText.setEnabled(false);
 		}
 		else {
@@ -700,7 +700,7 @@ public class MainWindow extends JFrame {
 	
 	private void saveText() {
 		if(currentBlock.getSharedStringList() != null) {
-			for(BlockData block : currentBlock.getSharedStringList()) {
+			for(ConvoData block : currentBlock.getSharedStringList()) {
 				block.setNewTextString(newText.getText());
 			}
 		}
@@ -710,7 +710,7 @@ public class MainWindow extends JFrame {
 		
 		//for now keep speakers separate, but i think most of them are the same
 		if(currentBlock.hasExtraInfo()) {
-			((ExtraInfoBlockData) currentBlock).setNewExtraInfoString(newExtraField.getText());
+			((ExtraInfoConvoData) currentBlock).setNewExtraInfoString(newExtraField.getText());
 		}
 	}
 	
@@ -741,12 +741,12 @@ public class MainWindow extends JFrame {
 			int newConvoSize = 0;
 			int oldTotalBlocksSize = 0;
 			int newTotalBlocksSize = 0;
-			Map<BlockData, byte[]> blockMap = new HashMap<BlockData, byte[]>();
-			Map<BlockData, byte[]> extraDataMap = new HashMap<BlockData, byte[]>();
+			Map<ConvoData, byte[]> blockMap = new HashMap<ConvoData, byte[]>();
+			Map<ConvoData, byte[]> extraDataMap = new HashMap<ConvoData, byte[]>();
 			
 			//first loop to get the new convo size
 			for(int j = firstBlock; j < lastBlock + 1; j++) {
-				BlockData block = currentScript.getBlockList().get(j);
+				ConvoData block = currentScript.getBlockList().get(j);
 				oldTotalBlocksSize += block.getFullBlockLength();
 				int extraInfoSizeDiff = 0;
 				byte[] newStringBytes = null;
@@ -754,8 +754,8 @@ public class MainWindow extends JFrame {
 				try {
 					newStringBytes = block.getNewTextString().getBytes("Shift-JIS");
 					if(block.hasExtraInfo()) {
-						newExtraInfoBytes = ((ExtraInfoBlockData) block).getNewExtraInfoString().getBytes("Shift-JIS");
-						extraInfoSizeDiff = newExtraInfoBytes.length - ((ExtraInfoBlockData) block).getExtraInfoLength();
+						newExtraInfoBytes = ((ExtraInfoConvoData) block).getNewExtraInfoString().getBytes("Shift-JIS");
+						extraInfoSizeDiff = newExtraInfoBytes.length - ((ExtraInfoConvoData) block).getExtraInfoLength();
 						extraDataMap.put(block, newExtraInfoBytes);
 					}
 				}
@@ -791,7 +791,7 @@ public class MainWindow extends JFrame {
 			}
 			
 			for(int j = firstBlock; j < lastBlock + 1; j++) {
-				BlockData block = currentScript.getBlockList().get(j);
+				ConvoData block = currentScript.getBlockList().get(j);
 				byte[] stringBytes = blockMap.get(block);
 				byte[] extraInfoBytes = null;
 				int newBlockLength = 0;
@@ -799,14 +799,14 @@ public class MainWindow extends JFrame {
 				
 				if(block.hasExtraInfo()) {
 					extraInfoBytes = extraDataMap.get(block);
-					extraInfoSizeDiff = extraInfoBytes.length - ((ExtraInfoBlockData) block).getExtraInfoLength();
+					extraInfoSizeDiff = extraInfoBytes.length - ((ExtraInfoConvoData) block).getExtraInfoLength();
 				}
 				newBlockLength = block.getFullBlockLength() + (stringBytes.length - block.getTextLength()) + extraInfoSizeDiff;
 				
 				try {
 					//write everything up to this block
 					fw.write(fullFileBytes, originalFileIndex, block.getBlockStart() - originalFileIndex);
-					Magic magic = block.getMagic();
+					ConvoMagic magic = block.getMagic();
 					byte[] info = magic.getFormat();
 					
 					byte[] lengthBytes = getShortBytes(newBlockLength);
@@ -814,12 +814,12 @@ public class MainWindow extends JFrame {
 					info[magic.getFullLengthOffset() + 1] = lengthBytes[1];
 					
 					//this writes the length of the chunk of data that comes first
-					if(magic == Magic.DIALOGUE) {
+					if(magic == ConvoMagic.DIALOGUE) {
 						lengthBytes = getShortBytes(stringBytes.length);
 						info[magic.getTextLengthOffset()] = lengthBytes[0];
 						info[magic.getTextLengthOffset() + 1] = lengthBytes[1];
 					}
-					else if(magic == Magic.NONDIALOGUE) { //nondialogue can only be 1 byte length long
+					else if(magic == ConvoMagic.NONDIALOGUE) { //nondialogue can only be 1 byte length long
 						info[magic.getTextLengthOffset()] = Integer.valueOf(stringBytes.length).byteValue();
 					}
 					else {
@@ -832,23 +832,23 @@ public class MainWindow extends JFrame {
 					originalFileIndex += (block.getBlockStart() - originalFileIndex) + info.length;
 					
 					//at this point, file should be at textStart
-					if(magic == Magic.DIALOGUE || magic == Magic.NONDIALOGUE) {
+					if(magic == ConvoMagic.DIALOGUE || magic == ConvoMagic.NONDIALOGUE) {
 						fw.write(stringBytes);
 						originalFileIndex += block.getTextLength();
 						
 						if(block.hasExtraInfo()) {
 							//speaker header
-							fw.write(fullFileBytes, originalFileIndex, (((ExtraInfoBlockData) block).getExtraInfoStart() - originalFileIndex) + SPEAKERLENGTHOFFSET);	
+							fw.write(fullFileBytes, originalFileIndex, (((ExtraInfoConvoData) block).getExtraInfoStart() - originalFileIndex) + SPEAKERLENGTHOFFSET);	
 							
 							fw.write(extraInfoBytes.length);
 							fw.write(extraInfoBytes);
 							
-							originalFileIndex += (((ExtraInfoBlockData) block).getExtraInfoStart() - originalFileIndex) + ((ExtraInfoBlockData) block).getExtraInfoLength();
+							originalFileIndex += (((ExtraInfoConvoData) block).getExtraInfoStart() - originalFileIndex) + ((ExtraInfoConvoData) block).getExtraInfoLength();
 						}
 					}
-					else if (magic != Magic.TEXTENTRYNODESCRIPT){
+					else if (magic != ConvoMagic.TEXTENTRYNODESCRIPT){
 						fw.write(extraInfoBytes);
-						originalFileIndex += ((ExtraInfoBlockData) block).getExtraInfoLength();
+						originalFileIndex += ((ExtraInfoConvoData) block).getExtraInfoLength();
 						lengthBytes = getShortBytes(stringBytes.length);
 						fw.write(lengthBytes);
 						fw.write(stringBytes);
@@ -889,7 +889,7 @@ public class MainWindow extends JFrame {
 	}
 	
 	private void loadFile(File file) { //dump old list, load one file
-		ScriptReader script = new ScriptReader(file);
+		ScriptParser script = new ScriptParser(file);
 		
 		fileListModel.clear();
 		scriptMap.clear();
@@ -906,11 +906,11 @@ public class MainWindow extends JFrame {
 		PrintWriter pw;
 		
 		for(File file: dir.listFiles(new BinFileFilter())) {
-			ScriptReader script = new ScriptReader(file);
+			ScriptParser script = new ScriptParser(file);
 			if(script.getBlockList().size() > 0) {
 				String scriptName = script.getFileName();
 				for(int i = 0; i < script.getBlockList().size(); i++) {
-					BlockData block = script.getBlockList().get(i);
+					ConvoData block = script.getBlockList().get(i);
 					String text = block.getTextString();
 					Map<String, List<Integer>> scriptMap = null;
 					List<Integer> blockList = null;
@@ -988,14 +988,14 @@ public class MainWindow extends JFrame {
 		List<String> list = new ArrayList<String>();
 		
 		for(File file: dir.listFiles(new BinFileFilter())) {
-			ScriptReader script = new ScriptReader(file);
+			ScriptParser script = new ScriptParser(file);
 			if(script.getBlockList().size() > 0) {
 				scriptMap.put(script, file);
 				fileListModel.addElement(script);
 				
-				for(BlockData block : script.getBlockList()) {
-					if(block.getMagic() == Magic.DIALOGUE) {
-						ExtraInfoBlockData extInfo = (ExtraInfoBlockData) block;
+				for(ConvoData block : script.getBlockList()) {
+					if(block.getMagic() == ConvoMagic.DIALOGUE) {
+						ExtraInfoConvoData extInfo = (ExtraInfoConvoData) block;
 						//byte[] fourData = ei.getFourBytes();
 						//String fourDataString = String.format("%X %X %X %X", fourData[0], fourData[1], fourData[2], fourData[3]);
 						//String finalString = "";
@@ -1042,7 +1042,7 @@ public class MainWindow extends JFrame {
 	
 	private void reloadFile(File file) {
 		int index = fileListModel.indexOf(currentScript);
-		ScriptReader script = new ScriptReader(file);
+		ScriptParser script = new ScriptParser(file);
 		scriptMap.remove(currentScript);
 		scriptMap.put(script, file);
 		fileListModel.set(index, script);

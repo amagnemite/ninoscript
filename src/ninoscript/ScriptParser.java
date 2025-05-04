@@ -5,17 +5,19 @@ import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
-import ninoscript.BlockData.*;
 
-public class ScriptReader {
-	public enum Magic {
+import ninoscript.ConvoData.*;
+
+public class ScriptParser {
+	public enum ConvoMagic {
 		DIALOGUE (Integer.valueOf(0x05).byteValue(), new byte[] {0x05, 0x00, 0x00, 0x01, 0x00, 0X00}, 1, 4),
 		NONDIALOGUE (Integer.valueOf(0x26).byteValue(), new byte[] {0x26, 0x00, 0x00, 0x01, 0x00}, 1, 4),
 		TEXTENTRY (Integer.valueOf(0x31).byteValue(), new byte[] {0x31, 0x00, 0x00, 0x07, 0x02, 0x02, 0x00, 0x00}, 1, 6),
@@ -33,7 +35,7 @@ public class ScriptReader {
 		private byte[] format;
 		private int fullLengthOffset;
 		private int textLengthOffset;
-		Magic(byte value, byte[] format, int fullLengthOffset, int textLengthOffset) {
+		ConvoMagic(byte value, byte[] format, int fullLengthOffset, int textLengthOffset) {
 			this.value = value;
 			this.format = format;
 			this.fullLengthOffset = fullLengthOffset;
@@ -58,7 +60,9 @@ public class ScriptReader {
 	}
 	
 	private static final int PADDING1 = 4;
-	private static final int SCRIPTNAMEINDEX = 8;
+	private static final int INTERNALSCRIPTNAMEINDEX = 8;
+	private static final int SECTIONS = 8;
+	private static final int VISUALBLOCKS = 8; //blocks 0-7 of section 5 seem to be visual related
 	private static final byte m = 0x6D;
 	private static final byte p = 0x70;
 	
@@ -67,19 +71,28 @@ public class ScriptReader {
 	private byte[] fullFileBytes;
 	private String scriptName = "";
 	private List<ConversationData> convoList = new ArrayList<ConversationData>();
-	private List<BlockData> blockList = new ArrayList<BlockData>();
+	private List<ConvoData> blockList = new ArrayList<ConvoData>();
+	private List<Integer> usedConvoIDs = new ArrayList<Integer>();
+	private List<Integer> unusedConvoIds = new ArrayList<Integer>();
 	
 	//only keep track of the first block that stores the string, since we can just cross reference in the stringlistmap
-	private Map<String, BlockData> existingStringMap = new HashMap<String, BlockData>();
-	private Map<String, List<BlockData>> stringListMap = new HashMap<String, List<BlockData>>();
+	private Map<String, ConvoData> existingStringMap = new HashMap<String, ConvoData>();
+	private Map<String, List<ConvoData>> stringListMap = new HashMap<String, List<ConvoData>>();
 	
-	public ScriptReader(File file) {
+	public ScriptParser(File file) {
 		int scriptNameLength = 0;
 		byte[] nameBytes = null;
 		int previousBlockCount = 0;
 		int lastBlockOfConv = 0;
 		boolean firstConvo = true;
-		BlockData data;
+		ConvoData data;
+		ByteBuffer sectionFive = null;
+		ByteBuffer sectionSeven;
+		
+		final int BLOCKZEROLENGTH = 12;
+		final int BLOCKONEPRECONVOLENGTH = 2;
+		final int BLOCKONESTRINGCOUNT = 2;
+		final int BLOCKONEPOSTCONVOLENGTH = 7;
 		
 		try {
 			FileInputStream input = new FileInputStream(file);
@@ -108,11 +121,11 @@ public class ScriptReader {
 		fileName = file.getName();
 		
 		if(!isSingleConvo) {
-			scriptNameLength = fullFileBytes[SCRIPTNAMEINDEX] & 0xFF;
+			scriptNameLength = fullFileBytes[INTERNALSCRIPTNAMEINDEX] & 0xFF;
 			nameBytes = new byte[scriptNameLength];
 			
 			for(int i = 1; i <= scriptNameLength; i++) {
-				nameBytes[i - 1] = fullFileBytes[SCRIPTNAMEINDEX + i];
+				nameBytes[i - 1] = fullFileBytes[INTERNALSCRIPTNAMEINDEX + i];
 			}
 			try {
 				scriptName = new String(nameBytes, "Shift-JIS");
@@ -120,6 +133,119 @@ public class ScriptReader {
 			catch (UnsupportedEncodingException e) {
 			}
 		}
+		
+		int k = 4;
+		for(int j = 0; j < SECTIONS; j++) { //4 after initial magic
+			if(j != 7) {
+				int length = (fullFileBytes[k] & 0xFF) | (fullFileBytes[k + 1] & 0xFF) << 8 | (fullFileBytes[k + 2] & 0xFF) << 16 |
+						(fullFileBytes[k + 3] & 0xFF) << 24;
+				
+				if(j != 5) {
+					k = 4 + length;
+				}
+				else {
+					sectionFive = ByteBuffer.allocate(length);
+					sectionFive.order(ByteOrder.LITTLE_ENDIAN);
+					sectionFive.put(fullFileBytes, k + 4, k + 4 + length);
+				}
+			}
+			else { //section 7/convoblock doesn't have an overall length
+				sectionSeven = ByteBuffer.allocate(fullFileBytes.length - 1 - k);
+				sectionSeven.order(ByteOrder.LITTLE_ENDIAN);
+				sectionSeven.put(fullFileBytes, k, fullFileBytes.length - 1);
+			}
+		}
+		//TODO: check to make sure all scripts can have a 5/7
+		
+		int flag;
+		for(int i = 0; i < VISUALBLOCKS; i++) {
+			int countByte = sectionFive.get() & 0xFF;
+			
+			switch(i) {
+				case 0:
+					for(int j = 0; j < countByte; j++) {
+						getSubFuncOneLength(sectionFive);
+						sectionFive.position(sectionFive.position() + BLOCKZEROLENGTH);
+					}
+					break;
+				case 1:
+					for(int j = 0; j < countByte; j++) {
+						//gets read again in func but need to ref here, so don't increment pos	
+						int firstByte = sectionFive.get(sectionFive.position()) & 0xFF;
+						getSubFuncOneLength(sectionFive);
+						sectionFive.position(sectionFive.position() + BLOCKONEPRECONVOLENGTH);		
+						getMultipleArrayLength(sectionFive, BLOCKONESTRINGCOUNT);			
+						getConvoIDs(sectionFive);
+						sectionFive.position(sectionFive.position() + BLOCKONEPOSTCONVOLENGTH);
+						
+						flag = sectionFive.getInt();
+						if((flag & 0x400) != 0) {
+							int loopCount = sectionFive.get() & 0xFF;
+							getMultipleArrayLength(sectionFive, loopCount);
+							if((flag & 0x800) != 0) {
+								System.out.println(fileName + " has 0x800 flag");
+								sectionFive.position(sectionFive.position() + 1);
+							}
+						}
+						if((flag & 0x4000) != 0) {
+							sectionFive.position(sectionFive.position() + 6);
+						}
+						if((flag & 0x8) != 0) {
+							sectionFive.position(sectionFive.position() + 8);
+						}
+						if((flag & 0x8000) != 0) {
+							sectionFive.position(sectionFive.position() + 4);
+						}
+						if((flag & 0x20) != 0) {
+							int length = sectionFive.get() & 0xFF;
+							sectionFive.position(sectionFive.position() + length);
+						}
+						if((flag & 0x100) != 0) {
+							sectionFive.position(sectionFive.position() + 1);
+						}
+						if((flag & 0x200) != 0) {
+							sectionFive.position(sectionFive.position() + 4);
+						}
+						if((flag & 0x10000) != 0) {
+							sectionFive.position(sectionFive.position() + 1);
+						}
+						if(firstByte == 1) {
+							sectionFive.position(sectionFive.position() + 28);
+						}
+					}
+					break;
+				case 2:	
+					for(int j = 0; j < countByte; j++) {
+						parseSectionTwo(sectionFive);
+					}
+					break;
+				case 3:
+					getSubFuncOneLength(sectionFive);
+					getArrayLength(sectionFive);
+					sectionFive.position(sectionFive.position() + 1);
+					flag = sectionFive.get() & 0xFF;
+					if((flag & 0x8) != 0) {
+						sectionFive.position(sectionFive.position() + 1);
+					}
+					getSubFuncTwoLength(sectionFive);
+					break;
+				case 4:
+					getSubFuncOneLength(sectionFive);
+					getConvoIDs(sectionFive);
+					sectionFive.position(sectionFive.position() + 2);
+					getSubFuncTwoLength(sectionFive);
+					break;
+				case 5:
+					System.out.println(fileName + " has section 6 of block 5");
+					break;
+					//getSubFuncOneLength(sectionFive);
+				case 6:
+					System.out.println(fileName + " has section 7 of block 5");
+					break;
+			}
+		}
+		
+		int convoID = 
 		
 		for(int i = 0; i < fullFileBytes.length; i++) {
 			byte b = fullFileBytes[i];
@@ -281,6 +407,246 @@ public class ScriptReader {
 		}
 	}
 	
+	private void getArrayLength(ByteBuffer buffer) {
+		int length = buffer.get() & 0xFF;
+		buffer.position(buffer.position() + length);
+	}
+	
+	private void getMultipleArrayLength(ByteBuffer buffer, int loopCount) {
+		for(int l = 0; l < loopCount; l++) {
+			getArrayLength(buffer);
+		}
+	}
+	
+	private void getSubFuncOneLength(ByteBuffer buffer) {
+		final int UNKNOWNFLAG1 = 0x3C;
+		final int UNKNOWNFLAG2 = 0x3;
+		
+		int flagVal = buffer.get() & 0xFF;
+		int loopCount = buffer.get() & 0xFF;
+		
+		if((flagVal & UNKNOWNFLAG1) == 0) {
+			if((flagVal & UNKNOWNFLAG2) != 0) {
+				buffer.position(buffer.position() + loopCount * 8); //read 8 bytes per loop
+			}
+		}
+		else {
+			for(int j = 0; j < loopCount; j++) {
+				getArrayLength(buffer); //read u8 length + array[length] per loop
+			}
+		}
+	}
+	
+	private void getSubFuncTwoLength(ByteBuffer buffer) {
+		final int CASETWOBYTES = 24;
+		final int CASEONEBYTES = 16;
+		final int CASEFOURBYTES = 28;
+		
+		buffer.position(buffer.position() + 1);
+		int switchVal = buffer.get() & 0xFF;
+		switch(switchVal) {
+			case 0:
+			case 2:
+				buffer.position(buffer.position() + CASETWOBYTES);
+				break;
+			case 1:
+				buffer.position(buffer.position() + CASEONEBYTES);
+				break;
+			case 3:
+				System.out.println(fileName + " case 3 in subfunc 2");
+				break;
+			case 4:
+				buffer.position(buffer.position() + CASEFOURBYTES);
+				break;
+		}
+	}
+	
+	private void getSubFuncThreeLength(ByteBuffer buffer) {
+		final int UNKNOWNFLAG1 = 0x81;
+		final int UNKNOWNFLAG2 = 0x2;
+		final int UNKNOWNFLAG3 = 0x4;
+		final int UNKNOWNFLAG4 = 0x40;
+		
+		buffer.position(buffer.position() + 4);
+		int flag = buffer.get() & 0xFF;
+		if((flag & UNKNOWNFLAG1) != 0 && (flag & UNKNOWNFLAG2) != 0) {
+			getArrayLength(buffer);
+			if((flag & UNKNOWNFLAG3) != 0) {
+				buffer.position(buffer.position() + 1);
+			}
+		}
+		if((flag & UNKNOWNFLAG4) != 0) {
+			buffer.position(buffer.position() + 1);
+		}
+	}
+	
+	private void getConvoIDs(ByteBuffer buffer) {
+		final int EXTRADATABYTES = 12;
+		int id = buffer.getInt();
+		
+		
+		if(id != 0xFFFFFFFF) {
+			usedConvoIDs.add(id);
+		}
+		
+		int loopCount = buffer.get() & 0xFF;
+		for(int j = 0; j < loopCount; j++) {
+			buffer.position(buffer.position() + EXTRADATABYTES);
+			id = buffer.getInt();
+			System.out.println("extra id: " + id);
+			usedConvoIDs.add(id);
+		}
+	}
+	
+	private void parseSectionTwo(ByteBuffer buffer) {
+		final int COMMONREAD = 2;
+		final int ONEPRESTRING = 1;
+		final int ONEPOSTSTRING = 8;
+		final int THREEPOSTFUNC = 6;
+		final int FOURPOSTFUNC = 4;
+		final int SIXPRECONVO = 20;
+		final int DPREFLAG = 5;
+		final int FORTYPOSTCONVO = 7;
+		
+		final int FOURFLAGONE = 0x8;
+		final int FOURFLAGTWO = 0x40;
+		final int SIXFLAGONE = 0x20;
+		final int SIXFLAGTWO = 0x40;
+		final int AFLAGONE = 0x1;
+		final int AFLAGTWO = 0x2;
+		final int DFLAG = 0x8;
+		final int FORTYFLAGONE = 0x8000;
+		final int FORTYFLAGTWO = 0x20;
+		final int FORTYFLAGTHREE = 0x100;
+		final int FORTYFLAGFOUR = 0x1;
+		final int FORTYFLAGFIVE = 0x2;
+		
+		int firstByte = buffer.get(buffer.position()) & 0xFF;
+		int flag;
+		getSubFuncOneLength(buffer);
+		buffer.position(buffer.position() + COMMONREAD);
+		
+		switch(firstByte) {
+			case 1:
+			case 2:
+				buffer.position(buffer.position() + ONEPRESTRING);
+				getArrayLength(buffer);
+				buffer.position(buffer.position() + ONEPOSTSTRING);
+				break;
+			case 3:
+				buffer.position(buffer.position() + 1);
+				getSubFuncThreeLength(buffer);
+				buffer.position(buffer.position() + THREEPOSTFUNC);
+				getConvoIDs(buffer);
+				break;
+			case 4:
+				buffer.position(buffer.position() + 1);
+				getSubFuncThreeLength(buffer);
+				buffer.position(buffer.position() + FOURPOSTFUNC);
+				flag = buffer.get() & 0xFF;
+				if((flag & FOURFLAGONE) != 0) {
+					buffer.position(buffer.position() + 1);
+				}
+				if((flag & FOURFLAGTWO) != 0) {
+					buffer.position(buffer.position() + 1);
+				}
+				getConvoIDs(buffer);
+				break;
+			case 5:
+				System.out.println(fileName + " has section 2 subsection 5");
+				break;
+			case 6:
+				getArrayLength(buffer);
+				buffer.position(buffer.position() + SIXPRECONVO);
+				getArrayLength(buffer);
+				buffer.position(buffer.position() + 1);
+				getConvoIDs(buffer);
+				flag = buffer.get() & 0xFF; 
+				if((flag & SIXFLAGONE) != 0) {
+					buffer.position(buffer.position() + 2);
+				}
+				if((flag & SIXFLAGTWO) != 0) {
+					buffer.position(buffer.position() + 2);
+				}
+				break;
+			case 7:
+				System.out.println(fileName + " has section 2 subsection 7");
+				break;
+			case 8:
+				System.out.println(fileName + " has section 2 subsection 8");
+				break;
+			case 9:
+				System.out.println(fileName + " has section 2 subsection 9");
+				break;
+			case 0xA:
+				flag = buffer.get() & 0xFF;
+				if((flag & AFLAGONE) != 0) {
+					buffer.position(buffer.position() + 2);
+				}
+				if((flag & AFLAGTWO) != 0) {
+					buffer.position(buffer.position() + 2);
+				}
+				break;
+			case 0xB:
+				System.out.println(fileName + " has section 2 subsection b");
+				break;
+			case 0xC:
+				System.out.println(fileName + " has section 2 subsection c");
+				break;
+			case 0xD:
+				buffer.position(buffer.position() + DPREFLAG);
+				flag = buffer.get() & 0xFF;
+				if((flag & DFLAG) != 0) {
+					getMultipleArrayLength(buffer, buffer.get() & 0xFF);
+				}
+				break;
+			case 0xE:
+				System.out.println(fileName + " has section 2 subsection e");
+				break;
+			case 0xF:
+				System.out.println(fileName + " has section 2 subsection f");
+				break;
+			case 0x10:
+				System.out.println(fileName + " has section 2 subsection 0x10");
+				break;
+			case 0x11:
+				System.out.println(fileName + " has section 2 subsection 0x11");
+				break;
+			case 0x12:
+				System.out.println(fileName + " has section 2 subsection 0x12");
+				break;
+			case 0x13:
+				System.out.println(fileName + " has section 2 subsection 0x13");
+				break;
+			case 0x41:
+				System.out.println(fileName + " has section 2 subsection 0x41");
+			case 0x40:
+				getArrayLength(buffer);
+				getArrayLength(buffer);
+				getConvoIDs(buffer);
+				flag = buffer.get() & 0xFF;
+				if((flag & FORTYFLAGONE) != 0) {
+					buffer.position(buffer.position() + 4);
+				}
+				if((flag & FORTYFLAGTWO) != 0) {
+					getArrayLength(buffer);
+				}
+				if((flag & FORTYFLAGTHREE) != 0) {
+					buffer.position(buffer.position() + 1);
+				}
+				flag = buffer.get() & 0xFF;
+				if((flag & FORTYFLAGFOUR) != 0) {
+					buffer.position(buffer.position() + 4);
+				}
+				if((flag & FORTYFLAGFIVE) != 0) {
+					buffer.position(buffer.position() + 4);
+				}
+				break;
+			default:
+				System.out.println(fileName + " has unknown section 2 type " + firstByte);
+		}
+	}
+	
 	private boolean isCharacter(int val) {
 		if((val >= 0x81 && val <= 0x84) || (val >= 0x21 && val <= 0x7E)) {
 			return true;
@@ -288,17 +654,17 @@ public class ScriptReader {
 		return false;
 	}
 	
-	private void checkIfStringExists(BlockData data) {
+	private void checkIfStringExists(ConvoData data) {
 		String string = data.getTextString();
 		
 		if(!existingStringMap.containsKey(string)) {
 			existingStringMap.put(string, data);
 		}
 		else {
-			BlockData firstBlock = existingStringMap.get(string);
-			List<BlockData> sublist;
+			ConvoData firstBlock = existingStringMap.get(string);
+			List<ConvoData> sublist;
 			if(!stringListMap.containsKey(string)) {
-				sublist = new ArrayList<BlockData>();
+				sublist = new ArrayList<ConvoData>();
 				stringListMap.put(string, sublist);
 				
 				sublist.add(firstBlock);	
@@ -312,7 +678,7 @@ public class ScriptReader {
 		}
 	}
 
-	private BlockData parseBlock(byte[] fullFileBytes, int start) {
+	private ConvoData parseBlock(byte[] fullFileBytes, int start) {
 		//TODO: may want to do something about 0x1c, which the jpn ver seems to use and sometimes appears in scripts
 		int shift = start + 1; //now at full length byte
 		byte[] textBytes;
@@ -415,11 +781,11 @@ public class ScriptReader {
 			}
 		}
 	
-		return new ExtraInfoBlockData(Magic.DIALOGUE, start, fullBlockLength, textLength, textStart, speakerStart, speakerLength, textBytes, speakerBytes,
+		return new ExtraInfoConvoData(ConvoMagic.DIALOGUE, start, fullBlockLength, textLength, textStart, speakerStart, speakerLength, textBytes, speakerBytes,
 				speakerDataBytes);
 	}
 	
-	private BlockData parseNonDialogue(byte[] fullFileBytes, int start) {
+	private ConvoData parseNonDialogue(byte[] fullFileBytes, int start) {
 		int shift = start + 1; //starts at full length
 		byte[] textBytes;
 		int fullBlockLength = (fullFileBytes[shift] & 0xFF) | (fullFileBytes[shift + 1] & 0xFF) << 8;
@@ -439,7 +805,7 @@ public class ScriptReader {
 			textBytes[i] = fullFileBytes[shift + i];
 		}
 		
-		return new BlockData(Magic.NONDIALOGUE, start, fullBlockLength, textLength, textStart, textBytes);
+		return new ConvoData(ConvoMagic.NONDIALOGUE, start, fullBlockLength, textLength, textStart, textBytes);
 	}
 	
 	private byte[] parseSpeaker(int nextByte, int nextByte2, int nextByte3, int shift, byte[] fullFileBytes) {
@@ -460,7 +826,7 @@ public class ScriptReader {
 		return null;
 	}
 	
-	private BlockData parseTextEntry(byte[] fullFileBytes, int start) {
+	private ConvoData parseTextEntry(byte[] fullFileBytes, int start) {
 		int shift = start + 1;
 		byte[] textBytes = null;
 		byte[] answerBytes;
@@ -469,7 +835,7 @@ public class ScriptReader {
 		int answerStart = -1;
 		int textLength = 0;
 		int textStart = 0;
-		Magic magic = null;
+		ConvoMagic magic = null;
 		
 		//TODO: may want some special handling for the japanese ver, which seems to use 0A for a formatting thing
 		
@@ -478,16 +844,16 @@ public class ScriptReader {
 		int id2 = fullFileBytes[shift + 1];
 		
 		if(id1 == 0x03 && id2 == 0x01) {
-			magic = Magic.TEXTENTRYLONG;
+			magic = ConvoMagic.TEXTENTRYLONG;
 			shift += 7;
 			//skip 03 01 01 00 00 00 02
 		}
 		else if(id1 == 0x02 && id2 == 0x01) {
-			magic = Magic.TEXTENTRYNODESCRIPT;
+			magic = ConvoMagic.TEXTENTRYNODESCRIPT;
 			shift += 2;
 		}
 		else {
-			magic = Magic.TEXTENTRY;
+			magic = ConvoMagic.TEXTENTRY;
 			shift += 2;
 		}
 		answerLength = fullFileBytes[shift] & 0xFF;
@@ -504,7 +870,7 @@ public class ScriptReader {
 		}
 		shift += answerLength;
 		
-		if(magic != Magic.TEXTENTRYNODESCRIPT) {
+		if(magic != ConvoMagic.TEXTENTRYNODESCRIPT) {
 			textLength = (fullFileBytes[shift] & 0xFF) | (fullFileBytes[shift + 1] & 0xFF) << 8;
 			shift += 2;
 			textStart = shift;
@@ -515,14 +881,14 @@ public class ScriptReader {
 			}
 		}
 		
-		return new ExtraInfoBlockData(magic, start, fullBlockLength, textLength, textStart, answerStart, answerLength, textBytes, answerBytes, null);
+		return new ExtraInfoConvoData(magic, start, fullBlockLength, textLength, textStart, answerStart, answerLength, textBytes, answerBytes, null);
 	}
 	
 	public String toString() {
 		return scriptName + " (" + fileName + ")";
 	}
 	
-	public List<BlockData> getBlockList() {
+	public List<ConvoData> getBlockList() {
 		return blockList;
 	}
 	

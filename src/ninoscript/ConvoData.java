@@ -3,10 +3,10 @@ package ninoscript;
 import java.io.UnsupportedEncodingException;
 import java.util.List;
 
-import ninoscript.ScriptReader.Magic;
+import ninoscript.ScriptParser.ConvoMagic;
 
-public class BlockData {
-	protected Magic magic;
+public class ConvoData {
+	protected ConvoMagic magic;
 	protected int blockStart;
 	protected int fullBlockLength;
 	protected int textStart;
@@ -17,9 +17,9 @@ public class BlockData {
 	protected String textString;
 	protected String newTextString;
 	
-	protected List<BlockData> sharedStringList = null;
+	protected List<ConvoData> sharedStringList = null;
 	
-	public BlockData(Magic magic, int blockStart, int fullBlockLength, int textLength, int textStart, byte[] textBytes) {
+	public ConvoData(ConvoMagic magic, int blockStart, int fullBlockLength, int textLength, int textStart, byte[] textBytes) {
 		this.magic = magic;
 		this.blockStart = blockStart;
 		this.fullBlockLength = fullBlockLength;
@@ -77,7 +77,7 @@ public class BlockData {
 		this.textString = textString;
 	}
 	
-	public Magic getMagic() {
+	public ConvoMagic getMagic() {
 		return magic;
 	}
 	
@@ -85,15 +85,15 @@ public class BlockData {
 		return blockStart;
 	}
 	
-	public List<BlockData> getSharedStringList() {
+	public List<ConvoData> getSharedStringList() {
 		return sharedStringList;
 	}
 
-	public void setSharedStringList(List<BlockData> sharedStringList) {
+	public void setSharedStringList(List<ConvoData> sharedStringList) {
 		this.sharedStringList = sharedStringList;
 	}
 	
-	public static class ExtraInfoBlockData extends BlockData { //blocks that have an extra string associated, so dialogue or text entry puzzles
+	public static class ExtraInfoConvoData extends ConvoData { //blocks that have an extra string associated, so dialogue or text entry puzzles
 		private int extraInfoStart; //actual start of the text, so -1 for length
 		private int extraInfoLength;
 		private byte[] extraInfoBytes;
@@ -103,7 +103,7 @@ public class BlockData {
 		
 		private byte[] speakerBytes;
 		
-		public ExtraInfoBlockData(Magic magic, int blockStart, int fullBlockLength, int textLength, int textStart,
+		public ExtraInfoConvoData(ConvoMagic magic, int blockStart, int fullBlockLength, int textLength, int textStart,
 				int extraInfoStart, int extraInfoLength, byte[] textBytes, byte[] extraInfoBytes, byte[] speakerBytes) {
 			super(magic, blockStart, fullBlockLength, textLength, textStart, textBytes);
 			this.extraInfoStart = extraInfoStart;

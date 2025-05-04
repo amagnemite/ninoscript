@@ -28,6 +28,7 @@ public class N2D {
 	private static final int TILEONEVAL = 1;
 	//private static final int TILETWOVAL = 2;
 	private static final int CELLVAL = 3;
+	private static final int SCREENVAL = 6;
 	
 	private static final int TILESIZE = 8;
 	//final int EIGHTBPP = 4;
@@ -72,7 +73,19 @@ public class N2D {
 	}
 	
 	public void generateImages(File targetDir) {
-		getCells(targetDir, subFiles.get(CELLVAL));
+		if(subFiles.get(PALETTEVAL) == null) { //some n2ds don't have palettes, not sure how they work
+			return;
+		}
+		
+		if(subFiles.get(CELLVAL) != null) {
+			getCells(targetDir, subFiles.get(CELLVAL));
+		}
+		else if(subFiles.get(SCREENVAL) != null) { //bgs use nscrs
+			getScreen(targetDir, subFiles.get(SCREENVAL));
+		}
+		else { //also rare instances of only a palette with no tiles + cells/scr
+			return;
+		}
 	}
 	
 	public int[][] getColors(SubFile nclr) {
@@ -167,6 +180,8 @@ public class N2D {
 		ByteBuffer ncgrBuffer;
 		buffer.position(ncgr.offset());
 		
+		boolean debugTiles = false;
+		
 		try {
 			ncgrBuffer = getUncompressedBuffer(ncgr.size());
 		}
@@ -215,27 +230,6 @@ public class N2D {
 		int bpp = colorDepth == FOURBPP ? 4 : 8;
 		int pixelCount = tileDataSize * 8 / bpp; //# of bits / bits per pixel
 		
-		/*
-		if(Math.pow((int) Math.sqrt(pixelCount), 2) == pixelCount) { //checking if it's a square
-			xPixelCount = yPixelCount = (int) Math.sqrt(pixelCount);
-		}
-		else { //this needs to be replaced for tile layouts, since not all pixelcounts support 256w
-			for(int i = 256; i > 0; i - 8) {
-				if(pixelCount < i) {
-					continue;
-				}
-			
-				int side = pixelCount / i;
-				if(side % 8 == 0) {
-					xPixelCount = side > i ? side : i;
-					yPixelCount = side > i ? i : side;
-					break;
-				}
-			}
-		}
-		*/
-		
-		//BufferedImage image = new BufferedImage(xPixelCount, yPixelCount, BufferedImage.TYPE_INT_ARGB);
 		colorArray[0][0] = 0; //color 0 is generally meant to be transparent
 		
 		int[] pixels;
@@ -267,7 +261,7 @@ public class N2D {
 				List<BufferedImage> tiles = new ArrayList<BufferedImage>();
 				tileLists.put(k, tiles);
 				uniquePalettes.add(k);
-				makeTile(pixelCount, pixels, tiles);
+				makeTiles(pixelCount, pixels, tiles);
 			}
 		}
 		else {
@@ -278,24 +272,55 @@ public class N2D {
 			
 			List<BufferedImage> tiles = new ArrayList<BufferedImage>();
 			tileLists.put(0, tiles);
-			makeTile(pixelCount, pixels, tiles);
+			makeTiles(pixelCount, pixels, tiles);
 		}
 		
-		/*
-		for(int h = 0; h < yPixelCount / TILESIZE; h++) {
-			for(int w = 0; w < xPixelCount / TILESIZE; w++) {
-				BufferedImage tile = new BufferedImage(TILESIZE, TILESIZE, BufferedImage.TYPE_INT_ARGB);
-				//tile.setRGB(w * TILESIZE, h * TILESIZE, TILESIZE, TILESIZE, pixels, index, TILESIZE);
-				tile.setRGB(0, 0, TILESIZE, TILESIZE, pixels, index, TILESIZE);
-				tiles.add(tile);
-				index += TILESIZE * TILESIZE;
+		if(debugTiles) {
+			if(Math.pow((int) Math.sqrt(pixelCount), 2) == pixelCount) { //checking if it's a square
+				xPixelCount = yPixelCount = (int) Math.sqrt(pixelCount);
+			}
+			else {
+				for(int i = 256; i > 0; i -= 8) {
+					if(pixelCount < i) {
+						continue;
+					}
+				
+					int side = pixelCount / i;
+					if(side % 8 == 0) {
+						xPixelCount = side > i ? side : i;
+						yPixelCount = side > i ? i : side;
+						break;
+					}
+				}
+			}
+			
+			int i = 0;
+			int j = 0;
+			for(List<BufferedImage> tiles : tileLists.values()) {
+				BufferedImage image = new BufferedImage(xPixelCount, yPixelCount, BufferedImage.TYPE_INT_ARGB);
+				Graphics g = image.getGraphics();
+				
+				for(int h = 0; h < yPixelCount / TILESIZE; h++) {
+					for(int w = 0; w < xPixelCount / TILESIZE; w++) {
+						g.drawImage(tiles.get(i), w * TILESIZE, h * TILESIZE, null);
+						i++;
+					}
+				}
+				try {
+					ImageIO.write(image, "png", new File(file.getParent(), "tile test" + j + ".png"));
+				}
+				catch (IOException e) {
+					
+				}
+				g.dispose();
 			}
 		}
-		*/
+			
+		
 		return tileLists;
 	}
 	
-	private void makeTile(int pixelCount, int[] pixels, List<BufferedImage> tiles) {
+	private void makeTiles(int pixelCount, int[] pixels, List<BufferedImage> tiles) {
 		int tileCount = pixelCount / (TILESIZE * TILESIZE);
 		int index = 0;
 		for(int i = 0; i < tileCount; i++) {
@@ -307,8 +332,9 @@ public class N2D {
 	}
 	
 	private void getCells(File targetDir, SubFile ncer) {
+		final int OAMSIZE = 6;
 		Map<Integer, List<BufferedImage>> tileLists = getTiles(subFiles.get(TILEONEVAL));
-		List<Bank> banks = new ArrayList<Bank>();
+		//List<Bank> banks = new ArrayList<Bank>();
 		
 		ByteBuffer ncerBuffer;
 		buffer.position(ncer.offset());
@@ -355,14 +381,16 @@ public class N2D {
 			if(metatileEntrySize == 0x01) { //0x01 has 8 extra bytes of data
 				ncerBuffer.position(ncerBuffer.position() + 8);
 			}
-			banks.add(new Bank(objCount, objOffset));
+			//banks.add(new Bank(objCount, objOffset));
 			ncerBuffer.mark();
-			ncerBuffer.position(cellTablePos + objOffset);
 			
 			BufferedImage image = new BufferedImage(512, 256, BufferedImage.TYPE_INT_ARGB);
 			Graphics g = image.getGraphics();
-			for(int j = 0; j < objCount; j++) { //iterate through the objs
+			int tilesUsed = 0;
+			
+			for(int j = objCount - 1; j >= 0; j--) { //iterate through the obj backward since defined as highest layer to lowest layer
 				//x and y pos use signed ints
+				ncerBuffer.position(cellTablePos + objOffset + j * OAMSIZE);
 				byte yPos = ncerBuffer.get();
 				int obj1TopHalf = ncerBuffer.get() & 0xFF;
 				
@@ -390,36 +418,34 @@ public class N2D {
 				
 				Size size = OBJSIZES[objShape][objSize];
 				List<BufferedImage> tiles = tileLists.get(paletteNumber);
-				int tileIterate = paletteMode == 0x1 ? tileNumber * 2 : tileNumber * 4; //only even tiles are allowed in 256 color mode
+				int tileIterate = 0 ;
+				if(paletteMode == 0x1) {
+					tileIterate = tileNumber * 2; //only even tiles are allowed in 256 color mode
+				}
+				else {
+					tileIterate = tileNumber < tilesUsed ? tileNumber * 4 : tileNumber;
+				}
 				//not sure what's up with 16/16 tiles
 				int maxVerticalTiles = size.height() / TILESIZE;
 				int maxHorizontalTiles = size.width() / TILESIZE;
 				
 				for(int h = 0; h < maxVerticalTiles; h++) {
 					for(int w = 0; w < maxHorizontalTiles; w++) {
-						//int y = 128 + yPos + TILESIZE * h;
 						int y = 128 + yPos;
 						int x = isXPosNegative ? 256 - xPos : 256 + xPos;
-						//x += TILESIZE * w;
 						BufferedImage tile = tiles.get(tileIterate);
 						
-						if(isHorizontalFlip == 0x1 || isVerticalFlip == 0x1) {
-							y = isVerticalFlip == 1 ? y + TILESIZE * (maxVerticalTiles - h) : y + TILESIZE * h;
-							x = isHorizontalFlip == 1 ? x + TILESIZE * (maxHorizontalTiles - w) : x + TILESIZE * w;
-							
-							g.drawImage(tile, x, y,
-									(1 - isHorizontalFlip * 2) * TILESIZE, (1 - isVerticalFlip * 2) * TILESIZE, null);
-						}
-						else {
-							y += TILESIZE * h;
-							x += TILESIZE * w;
-							
-							g.drawImage(tile, x, y, null);
-						}
+						y = isVerticalFlip == 1 ? y + TILESIZE * (maxVerticalTiles - h) : y + TILESIZE * h;
+						x = isHorizontalFlip == 1 ? x + TILESIZE * (maxHorizontalTiles - w) : x + TILESIZE * w;
+						
+						g.drawImage(tile, x, y,
+								(1 - isHorizontalFlip * 2) * TILESIZE, (1 - isVerticalFlip * 2) * TILESIZE, null);
 						
 						tileIterate++;
 					}
 				}
+				
+				tilesUsed += maxVerticalTiles * maxHorizontalTiles;
 			}
 			try {
 				String filename = file.getName().substring(0, file.getName().lastIndexOf('.'));
@@ -434,6 +460,61 @@ public class N2D {
 			ncerBuffer.reset();
 		}
 	}
+	
+	private void getScreen(File targetDir, SubFile nscr) {
+		Map<Integer, List<BufferedImage>> tileLists = getTiles(subFiles.get(TILEONEVAL));
+		ByteBuffer nscrBuffer;
+		buffer.position(nscr.offset());
+		
+		try {
+			nscrBuffer = getUncompressedBuffer(nscr.size());
+		}
+		catch (IOException e) {
+			return;
+		}
+		
+		nscrBuffer.position(24);
+		int screenWidth = nscrBuffer.getShort();
+		int screenHeight = nscrBuffer.getShort();
+		nscrBuffer.position(nscrBuffer.position() + 4); //0
+		int screenDataSize = nscrBuffer.getInt();
+		
+		int maxHorizontalTiles = screenWidth / TILESIZE;
+		int maxVerticalTiles = screenHeight / TILESIZE;
+		
+		BufferedImage image = new BufferedImage(screenWidth, screenHeight, BufferedImage.TYPE_INT_ARGB);
+		Graphics g = image.getGraphics();
+		
+		for(int h = 0; h < maxVerticalTiles; h++) {
+			for(int w = 0; w < maxHorizontalTiles; w++) {
+				int data = nscrBuffer.getShort();
+				int tileNum = data & 0x3FF;
+				int isHorizontalFlip = (data >> 10) & 0x1;
+				int isVerticalFlip = (data >> 11) & 0x1;
+				int paletteNum = (data >> 12) & 0xF;
+				
+				List<BufferedImage> tiles = tileLists.get(paletteNum);
+				BufferedImage tile = tiles.get(tileNum);
+				
+				//flipping is on a singular tile basis here
+				int y = isVerticalFlip == 1 ? TILESIZE * (h + 1) : TILESIZE * h;
+				int x = isHorizontalFlip == 1 ? TILESIZE * (w + 1) : TILESIZE * w;
+				
+				g.drawImage(tile, x, y,
+					(1 - isHorizontalFlip * 2) * TILESIZE, (1 - isVerticalFlip * 2) * TILESIZE, null);
+			}
+		}
+		try {
+			String filename = file.getName().substring(0, file.getName().lastIndexOf('.'));
+			String foldername = file.getParent().substring(file.getParent().lastIndexOf('\\') + 1);
+			ImageIO.write(image, "png", new File(targetDir.getAbsolutePath(), foldername + "." + filename + ".png"));
+		}
+		catch (IOException e) {
+			
+		}
+		g.dispose();
+	}
+	
 	
 	record Bank(int cellCount, int objOffset) {
 	}
