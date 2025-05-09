@@ -23,10 +23,12 @@ import java.util.Map.Entry;
 
 import javax.swing.BorderFactory;
 import javax.swing.ButtonGroup;
+import javax.swing.DefaultComboBoxModel;
 import javax.swing.DefaultListModel;
 import javax.swing.DefaultListSelectionModel;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
+import javax.swing.JComboBox;
 import javax.swing.JFileChooser;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
@@ -52,8 +54,8 @@ import javax.swing.text.BadLocationException;
 import javax.swing.text.Document;
 
 import n2dhandler.N2D;
-import ninoscript.ConvoData.*;
-import ninoscript.ScriptParser.ConversationData;
+import ninoscript.ConvoSubBlockData.*;
+import ninoscript.ScriptParser.Conversation;
 import ninoscript.ScriptParser.ConvoMagic;
 
 @SuppressWarnings("serial")
@@ -89,6 +91,10 @@ public class MainWindow extends JFrame {
 	JTextField newExtraField = new JTextField(10);
 	JCheckBox scriptingCheck = new JCheckBox("Hide extra text data");
 	
+	JCheckBox showUnusedCheck = new JCheckBox("Show unused convos");
+	DefaultComboBoxModel<Integer> idComboModel = new DefaultComboBoxModel<Integer>();
+	JComboBox<Integer> idCombo = new JComboBox<Integer>(idComboModel);
+	
 	ButtonGroup fontGroup = new ButtonGroup();
 	JRadioButton f10Button = new JRadioButton("font10");
 	JRadioButton f12Button = new JRadioButton("font12");
@@ -102,6 +108,7 @@ public class MainWindow extends JFrame {
 	private boolean isSpeakerBorder = true;
 	private boolean setText = true;
 	private boolean hideScriptingInfo = false;
+	private boolean showUnusedIDs = false;
 	
 	private Map<String, Integer> currentFontMap = null;
 	private Map<String, Integer> font10Map = null;
@@ -109,7 +116,8 @@ public class MainWindow extends JFrame {
 	
 	private Map<ScriptParser, File> scriptMap = new HashMap<ScriptParser, File>();
 	private ScriptParser currentScript = null;
-	private ConvoData currentBlock;
+	private Conversation currentConvo;
+	private ConvoSubBlockData currentBlock;
 	private String currentString;
 	private List<Integer> newLineLocs = new ArrayList<Integer>();
 	
@@ -164,13 +172,28 @@ public class MainWindow extends JFrame {
 		c.gridx = 0;
 		blockPanel.add(new JLabel("Block number:"), c);
 		c.insets = new Insets(0, 0, 0, 5);
-		c.gridx = 1;
+		c.gridx = GridBagConstraints.RELATIVE;
 		c.ipadx = 10;
 		blockPanel.add(blockSpinner, c);
-		c.gridx = 2;
+		c.gridx = GridBagConstraints.RELATIVE;
 		c.ipadx = 5;
 		blockPanel.add(blockMaxLabel, c);
 		
+		JPanel idPanel = new JPanel();
+		idPanel.setLayout(new GridBagLayout());
+		c = new GridBagConstraints();
+		c.insets = new Insets(0, 5, 0, 5);
+		c.gridy = 0;
+		c.gridx = 0;
+		idPanel.add(new JLabel("Convo number:"), c);
+		c.insets = new Insets(0, 0, 0, 5);
+		c.gridx = GridBagConstraints.RELATIVE;
+		c.ipadx = 10;
+		idPanel.add(idCombo, c);
+		//c.gridx = GridBagConstraints.RELATIVE;
+		//c.ipadx = 5;
+		//idPanel.add(showUnusedCheck, c);
+
 		JPanel originalTextPanel = new JPanel();
 		originalTextPanel.setLayout(new GridBagLayout());
 		c = new GridBagConstraints();
@@ -212,29 +235,32 @@ public class MainWindow extends JFrame {
 		fileScroll.setMinimumSize(new Dimension(fileList.getPreferredScrollableViewportSize().width, 
 				fileList.getPreferredScrollableViewportSize().height));
 		
-		gbcon.gridheight = 4;
+		gbcon.gridheight = 5;
 		gbcon.fill = GridBagConstraints.BOTH;
 		addGB(fileScroll, 0, 0);
 		
 		gbcon.fill = GridBagConstraints.NONE;
 		gbcon.gridheight = 1;
-		
 		gbcon.anchor = GridBagConstraints.WEST;
-		addGB(blockPanel, GridBagConstraints.RELATIVE, 0);
-		addGB(buttonPanel, GridBagConstraints.RELATIVE, 0);
 		
-		addGB(scriptingCheck, GridBagConstraints.RELATIVE, 0);
+		addGB(idPanel, GridBagConstraints.RELATIVE, 0);
+		addGB(showUnusedCheck, GridBagConstraints.RELATIVE, 0);
+		
+		addGB(blockPanel, 1, 1);
+		addGB(buttonPanel, GridBagConstraints.RELATIVE, 1);
+		
+		addGB(scriptingCheck, GridBagConstraints.RELATIVE, 1);
 		
 		gbcon.gridwidth = 2;
-		addGB(originalTextPanel, 1, 1);
+		addGB(originalTextPanel, 1, 2);
 		addGB(newTextPanel, 1, GridBagConstraints.RELATIVE);
 		
 		gbcon.gridwidth = 1;
 		addGB(saveFileButton, 1, GridBagConstraints.RELATIVE);
 		
 		gbcon.anchor = GridBagConstraints.NORTHWEST;
-		addGB(originalExtraPanel, 3, 1);
-		addGB(newExtraPanel, 3, 2);
+		addGB(originalExtraPanel, 3, 2);
+		addGB(newExtraPanel, 3, GridBagConstraints.RELATIVE);
 		
 		initListeners();
 		originalText.setPreferredSize(getSize());
@@ -355,11 +381,11 @@ public class MainWindow extends JFrame {
 			
 			if(index != -1) {
 				if(currentScript != null) {
-					for(ConvoData block : currentScript.getBlockList()) {
+					for(ConvoSubBlockData block : currentConvo.getBlockList()) {
 						//wipes any new stuff that wasn't saved to file
 						block.setNewTextString(block.getTextString());
-						if(block.hasExtraInfo()) {
-							((ExtraInfoConvoData) block).setNewExtraInfoString(((ExtraInfoConvoData) block).getExtraInfoString());
+						if(block.hasExtraString()) {
+							((ExtraStringConvoData) block).setNewExtraInfoString(((ExtraStringConvoData) block).getExtraInfoString());
 						}
 					}
 				}
@@ -370,12 +396,12 @@ public class MainWindow extends JFrame {
 				setText = false;
 				blockSpinnerModel.setMinimum(-1); //really roundabout way of always forcing the first block to be rendered
 				blockSpinnerModel.setValue(-1);
-				blockSpinnerModel.setMaximum(currentScript.getBlockList().size() - 1);
+				blockSpinnerModel.setMaximum(currentConvo.getBlockList().size() - 1);
 				blockSpinnerModel.setMinimum(0);
 				setText = true;
 				blockSpinnerModel.setValue(0);
 				
-				blockMaxLabel.setText("of " + (currentScript.getBlockList().size() - 1));
+				blockMaxLabel.setText("of " + (currentConvo.getBlockList().size() - 1));
 			}
 			else {
 				clearComponents();
@@ -390,7 +416,7 @@ public class MainWindow extends JFrame {
 				saveText();
 			}
 			
-			currentBlock = currentScript.getBlockList().get((int) blockSpinner.getValue());
+			currentBlock = currentConvo.getBlockList().get((int) blockSpinner.getValue());
 			
 			updateTextComponents();
 			currentString = newText.getText();
@@ -501,6 +527,22 @@ public class MainWindow extends JFrame {
 			updateTextComponents();
 		});
 		
+		showUnusedCheck.addItemListener(event -> {
+			idComboModel.removeAllElements();
+			if(scriptingCheck.isSelected()) {
+				idComboModel.addAll(currentScript.getConvoMap().keySet());
+			}
+			else {
+				List<Integer> usedIDs = currentScript.getUsedConvoIDs();
+				for(Entry<Integer, Conversation> entry : currentScript.getConvoMap().entrySet()) {
+					if(usedIDs.contains(entry.getValue().getId())) {
+						idComboModel.addElement(entry.getKey());
+					}
+				}
+			}
+			idCombo.setSelectedIndex(0);
+		});
+		
 		saveFileButton.addActionListener(event -> {
 			writeFile();
 		});
@@ -588,13 +630,12 @@ public class MainWindow extends JFrame {
 		
 		newText.setText(currentBlock.getNewTextString());
 		
-		if(currentBlock.hasExtraInfo()) {
-			originalExtraField.setText(((ExtraInfoConvoData) currentBlock).getExtraInfoString());
-			newExtraField.setText(((ExtraInfoConvoData) currentBlock).getNewExtraInfoString());
+		if(currentBlock.hasExtraString()) {
+			originalExtraField.setText(((ExtraStringConvoData) currentBlock).getExtraInfoString());
+			newExtraField.setText(((ExtraStringConvoData) currentBlock).getNewExtraInfoString());
 			newExtraField.setEnabled(true);
 			
-			if(isSpeakerBorder && (magic == ConvoMagic.TEXTENTRY || magic == ConvoMagic.TEXTENTRYLONG ||
-					magic == ConvoMagic.TEXTENTRYNODESCRIPT)) {
+			if(isSpeakerBorder && magic == ConvoMagic.TEXTENTRY) {
 				originalExtraPanel.setBorder(BorderFactory.createTitledBorder(ORIGINALANSWER));
 				newExtraPanel.setBorder(BorderFactory.createTitledBorder(NEWANSWER));
 				isSpeakerBorder = false;
@@ -614,7 +655,7 @@ public class MainWindow extends JFrame {
 			newExtraField.setEnabled(false);
 		}
 		
-		if(magic == ConvoMagic.TEXTENTRYNODESCRIPT) {
+		if(magic == ConvoMagic.TEXTENTRY && !currentBlock.hasMainString()) {
 			newText.setEnabled(false);
 		}
 		else {
@@ -700,7 +741,7 @@ public class MainWindow extends JFrame {
 	
 	private void saveText() {
 		if(currentBlock.getSharedStringList() != null) {
-			for(ConvoData block : currentBlock.getSharedStringList()) {
+			for(ConvoSubBlockData block : currentBlock.getSharedStringList()) {
 				block.setNewTextString(newText.getText());
 			}
 		}
@@ -709,8 +750,8 @@ public class MainWindow extends JFrame {
 		}
 		
 		//for now keep speakers separate, but i think most of them are the same
-		if(currentBlock.hasExtraInfo()) {
-			((ExtraInfoConvoData) currentBlock).setNewExtraInfoString(newExtraField.getText());
+		if(currentBlock.hasExtraString()) {
+			((ExtraStringConvoData) currentBlock).setNewExtraInfoString(newExtraField.getText());
 		}
 	}
 	
@@ -721,9 +762,14 @@ public class MainWindow extends JFrame {
 		FileOutputStream fw;
 		int originalFileIndex = 0;
 		byte[] fullFileBytes = currentScript.getFullFileBytes();
-		final int SPEAKERLENGTHOFFSET = -1; //one back from speaker start
 		final byte[] CONVERSATIONMARKER = {0x0A, 0x09, 0x19, 0x00};
-		int firstBlock = 0;
+		
+		//write gets upset if >255 and need to pad 00s anyway
+		ByteBuffer fourByteBuffer = ByteBuffer.allocate(4);
+		fourByteBuffer.order(ByteOrder.LITTLE_ENDIAN);
+		
+		ByteBuffer twoByteBuffer = ByteBuffer.allocate(2);
+		twoByteBuffer.order(ByteOrder.LITTLE_ENDIAN);
 		
 		saveText();
 		
@@ -736,26 +782,25 @@ public class MainWindow extends JFrame {
 			return;
 		}
 		
-		for(ConversationData convo : currentScript.getConvoList()) {
-			int lastBlock = convo.getLastBlock();
+		for(Entry<Integer, Conversation> entry : currentScript.getConvoMap().entrySet()) {
+			Conversation convo = entry.getValue();
 			int newConvoSize = 0;
 			int oldTotalBlocksSize = 0;
 			int newTotalBlocksSize = 0;
-			Map<ConvoData, byte[]> blockMap = new HashMap<ConvoData, byte[]>();
-			Map<ConvoData, byte[]> extraDataMap = new HashMap<ConvoData, byte[]>();
+			Map<ConvoSubBlockData, byte[]> blockMap = new HashMap<ConvoSubBlockData, byte[]>();
+			Map<ConvoSubBlockData, byte[]> extraDataMap = new HashMap<ConvoSubBlockData, byte[]>();
 			
-			//first loop to get the new convo size
-			for(int j = firstBlock; j < lastBlock + 1; j++) {
-				ConvoData block = currentScript.getBlockList().get(j);
+			//first loop to get the new overall convo size
+			for(ConvoSubBlockData block : convo.getBlockList()) {
 				oldTotalBlocksSize += block.getFullBlockLength();
 				int extraInfoSizeDiff = 0;
 				byte[] newStringBytes = null;
 				byte[] newExtraInfoBytes = null;
 				try {
 					newStringBytes = block.getNewTextString().getBytes("Shift-JIS");
-					if(block.hasExtraInfo()) {
-						newExtraInfoBytes = ((ExtraInfoConvoData) block).getNewExtraInfoString().getBytes("Shift-JIS");
-						extraInfoSizeDiff = newExtraInfoBytes.length - ((ExtraInfoConvoData) block).getExtraInfoLength();
+					if(block.hasExtraString()) {
+						newExtraInfoBytes = ((ExtraStringConvoData) block).getNewExtraInfoString().getBytes("Shift-JIS");
+						extraInfoSizeDiff = newExtraInfoBytes.length - ((ExtraStringConvoData) block).getExtraInfoLength();
 						extraDataMap.put(block, newExtraInfoBytes);
 					}
 				}
@@ -767,20 +812,15 @@ public class MainWindow extends JFrame {
 			}
 			newConvoSize = (convo.getLength() - oldTotalBlocksSize) + newTotalBlocksSize;
 			
-			try {
-				//write everything up to the index of length of the convo start
-				if(convo.getStart() != 0) {
-					fw.write(fullFileBytes, originalFileIndex, convo.getStart() - originalFileIndex);
+			//write everything up to the index of length of the convo start
+			try {	
+				if(convo.getStartOffset() != 0) {
+					fw.write(fullFileBytes, originalFileIndex, convo.getStartOffset() - originalFileIndex);
 					
-					//write gets upset if >255 and need to pad 00s anyway
-					ByteBuffer bb = ByteBuffer.allocate(4);
-					bb.order(ByteOrder.LITTLE_ENDIAN);
-					byte[] lengthBytes = bb.putInt(newConvoSize).array();
-					
-					fw.write(lengthBytes);				
+					fw.write(fourByteBuffer.putInt(newConvoSize).array());				
 					fw.write(CONVERSATIONMARKER);
 					
-					originalFileIndex += (convo.getStart() - originalFileIndex) + 8;
+					originalFileIndex += (convo.getStartOffset() - originalFileIndex) + 8;
 				}
 				else { //for one convo files
 					fw.write(CONVERSATIONMARKER);
@@ -790,16 +830,16 @@ public class MainWindow extends JFrame {
 			catch (IOException e) {
 			}
 			
-			for(int j = firstBlock; j < lastBlock + 1; j++) {
-				ConvoData block = currentScript.getBlockList().get(j);
+			//now writing actual convo blocks
+			for(ConvoSubBlockData block : convo.getBlockList()) {
 				byte[] stringBytes = blockMap.get(block);
 				byte[] extraInfoBytes = null;
 				int newBlockLength = 0;
 				int extraInfoSizeDiff = 0;
 				
-				if(block.hasExtraInfo()) {
+				if(block.hasExtraString()) {
 					extraInfoBytes = extraDataMap.get(block);
-					extraInfoSizeDiff = extraInfoBytes.length - ((ExtraInfoConvoData) block).getExtraInfoLength();
+					extraInfoSizeDiff = extraInfoBytes.length - ((ExtraStringConvoData) block).getExtraInfoLength();
 				}
 				newBlockLength = block.getFullBlockLength() + (stringBytes.length - block.getTextLength()) + extraInfoSizeDiff;
 				
@@ -807,59 +847,61 @@ public class MainWindow extends JFrame {
 					//write everything up to this block
 					fw.write(fullFileBytes, originalFileIndex, block.getBlockStart() - originalFileIndex);
 					ConvoMagic magic = block.getMagic();
-					byte[] info = magic.getFormat();
 					
-					byte[] lengthBytes = getShortBytes(newBlockLength);
-					info[magic.getFullLengthOffset()] = lengthBytes[0];
-					info[magic.getFullLengthOffset() + 1] = lengthBytes[1];
+					fw.write(block.getMagic().getValue());
+					fw.write(twoByteBuffer.putShort((short) newBlockLength).array()); //new overall block length
 					
-					//this writes the length of the chunk of data that comes first
-					if(magic == ConvoMagic.DIALOGUE) {
-						lengthBytes = getShortBytes(stringBytes.length);
-						info[magic.getTextLengthOffset()] = lengthBytes[0];
-						info[magic.getTextLengthOffset() + 1] = lengthBytes[1];
+					originalFileIndex += 3;
+					
+					//write everything between the full length and the text length
+					fw.write(fullFileBytes, originalFileIndex, block.getTextStart() - originalFileIndex);
+					
+					//text length
+					switch(magic) {
+						case DIALOGUE:
+							fw.write(twoByteBuffer.putShort((short) stringBytes.length).array()); //new length
+							originalFileIndex += 2;
+							break;			
+						case NONDIALOGUE: //nondialogue can only be 1 byte length long
+							fw.write(Integer.valueOf(stringBytes.length).byteValue());
+							originalFileIndex++;
+							break;
+						case TEXTENTRY:
+							fw.write(twoByteBuffer.putShort((short) extraInfoBytes.length).array()); //new length
+							originalFileIndex += 2;
+							break;
 					}
-					else if(magic == ConvoMagic.NONDIALOGUE) { //nondialogue can only be 1 byte length long
-						info[magic.getTextLengthOffset()] = Integer.valueOf(stringBytes.length).byteValue();
-					}
-					else {
-						lengthBytes = getShortBytes(extraInfoBytes.length);
-						info[magic.getTextLengthOffset()] = lengthBytes[0];
-						info[magic.getTextLengthOffset() + 1] = lengthBytes[1];
-					}
 					
-					fw.write(info);
-					originalFileIndex += (block.getBlockStart() - originalFileIndex) + info.length;
-					
-					//at this point, file should be at textStart
-					if(magic == ConvoMagic.DIALOGUE || magic == ConvoMagic.NONDIALOGUE) {
-						fw.write(stringBytes);
-						originalFileIndex += block.getTextLength();
-						
-						if(block.hasExtraInfo()) {
-							//speaker header
-							fw.write(fullFileBytes, originalFileIndex, (((ExtraInfoConvoData) block).getExtraInfoStart() - originalFileIndex) + SPEAKERLENGTHOFFSET);	
-							
-							fw.write(extraInfoBytes.length);
+					//at this point, file should be at the start of the actual text
+					switch(magic) {
+						case DIALOGUE:
+						case NONDIALOGUE:
+							fw.write(stringBytes);
+							originalFileIndex += block.getTextLength();
+							if(block.hasExtraString()) {
+								fw.write(fullFileBytes, originalFileIndex, ((ExtraStringConvoData) block).getExtraInfoStart() - originalFileIndex);	
+								
+								fw.write(extraInfoBytes.length);
+								fw.write(extraInfoBytes);
+								
+								originalFileIndex += (((ExtraStringConvoData) block).getExtraInfoStart() - originalFileIndex) + 1 + ((ExtraStringConvoData) block).getExtraInfoLength();
+							}
+							break;
+						case TEXTENTRY:
 							fw.write(extraInfoBytes);
+							originalFileIndex += ((ExtraStringConvoData) block).getExtraInfoLength();
+							if(block.hasMainString()) { //text entry strings are placed end to end
+								fw.write(twoByteBuffer.putShort((short) stringBytes.length).array());
+								fw.write(stringBytes);
+								originalFileIndex += (block.getTextStart() - originalFileIndex) + 2 + block.getTextLength();
+							}
 							
-							originalFileIndex += (((ExtraInfoConvoData) block).getExtraInfoStart() - originalFileIndex) + ((ExtraInfoConvoData) block).getExtraInfoLength();
-						}
-					}
-					else if (magic != ConvoMagic.TEXTENTRYNODESCRIPT){
-						fw.write(extraInfoBytes);
-						originalFileIndex += ((ExtraInfoConvoData) block).getExtraInfoLength();
-						lengthBytes = getShortBytes(stringBytes.length);
-						fw.write(lengthBytes);
-						fw.write(stringBytes);
-						originalFileIndex += (block.getTextStart() - originalFileIndex) + block.getTextLength();
 					}
 				}
 				catch (IOException e) {
 					//
 				}
 			}
-			firstBlock = convo.getLastBlock() + 1;
 		}
 		
 		try {
@@ -881,13 +923,6 @@ public class MainWindow extends JFrame {
 		reloadFile(scriptMap.get(currentScript));
 	}
 	
-	private byte[] getShortBytes(int integer) {
-		ByteBuffer bb = ByteBuffer.allocate(2);
-		bb.order(ByteOrder.LITTLE_ENDIAN);
-		
-		return bb.putShort((short) integer).array();
-	}
-	
 	private void loadFile(File file) { //dump old list, load one file
 		ScriptParser script = new ScriptParser(file);
 		
@@ -899,53 +934,58 @@ public class MainWindow extends JFrame {
 		fileList.setSelectedIndex(0);
 	}
 	
-	private void findAllMatches(File dir) {
-		Map<String, Map<String, List<Integer>>> textMap = new HashMap<String, Map<String, List<Integer>>>();
+	private void findAllMatches(File dir) { //find all matching strings across all files
+		//a string, list of files and where that string occurs in that file
+		Map<String, Map<String, List<String>>> stringMap = new HashMap<String, Map<String, List<String>>>();
 		
 		FileWriter fw;
 		PrintWriter pw;
 		
 		for(File file: dir.listFiles(new BinFileFilter())) {
 			ScriptParser script = new ScriptParser(file);
-			if(script.getBlockList().size() > 0) {
+			if(script.getConvoMap().size() > 0) {
 				String scriptName = script.getFileName();
-				for(int i = 0; i < script.getBlockList().size(); i++) {
-					ConvoData block = script.getBlockList().get(i);
-					String text = block.getTextString();
-					Map<String, List<Integer>> scriptMap = null;
-					List<Integer> blockList = null;
-					if(!textMap.containsKey(text)) {
-						scriptMap = new HashMap<String, List<Integer>>();
-						textMap.put(text, scriptMap);
-					}
-					else {
-						scriptMap = textMap.get(text);
-					}
+				for(Entry<Integer, Conversation> entry : script.getConvoMap().entrySet()) {
+					Conversation convo = entry.getValue();
+					Map<String, List<String>> scriptOccurrancesMap = null;
+					List<String> blockList = null;
 					
-					if(!scriptMap.containsKey(scriptName)) {
-						blockList = new ArrayList<Integer>();
-						scriptMap.put(scriptName, blockList);
+					for(int i = 0; i < convo.getBlockList().size(); i++) {
+						ConvoSubBlockData block = convo.getBlockList().get(i);
+						String text = block.getTextString();
+						
+						if(!stringMap.containsKey(text)) {
+							scriptOccurrancesMap = new HashMap<String, List<String>>();
+							stringMap.put(text, scriptOccurrancesMap);
+						}
+						else {
+							scriptOccurrancesMap = stringMap.get(text);
+						}
+						
+						if(!scriptOccurrancesMap.containsKey(scriptName)) {
+							blockList = new ArrayList<String>();
+							scriptOccurrancesMap.put(scriptName, blockList);
+						}
+						else {
+							blockList = scriptOccurrancesMap.get(scriptName);
+						}
+						
+						blockList.add(entry.getKey() + "." + i);
 					}
-					else {
-						blockList = scriptMap.get(scriptName);
-					}
-					
-					blockList.add(i);
 				}
 			}
 		}
-		
 		
 		try {
 			fw = new FileWriter("matching.txt");
 			pw = new PrintWriter(fw);
 			
-			for(Entry<String, Map<String, List<Integer>>> textMapEntry : textMap.entrySet()) {
+			for(Entry<String, Map<String, List<String>>> textMapEntry : stringMap.entrySet()) {
 				boolean skipEntry = false;
 				
 				//if one script entry and block count == 1
 				if(textMapEntry.getValue().size() == 1) {
-					for(List<Integer> list : textMapEntry.getValue().values()) { //key doesn't matter; just interested in the list
+					for(List<String> list : textMapEntry.getValue().values()) { //key doesn't matter; just interested in the list
 						if(list.size() == 1) {
 							skipEntry = true;
 						}
@@ -957,9 +997,9 @@ public class MainWindow extends JFrame {
 				
 				pw.println("string: " + textMapEntry.getKey());
 				
-				for(Entry<String, List<Integer>> scriptMapEntry : textMapEntry.getValue().entrySet()) {
+				for(Entry<String, List<String>> scriptMapEntry : textMapEntry.getValue().entrySet()) {
 					pw.print(" - " + scriptMapEntry.getKey() + ": ");
-					Iterator<Integer> iterator = scriptMapEntry.getValue().iterator();
+					Iterator<String> iterator = scriptMapEntry.getValue().iterator();
 					
 					while(iterator.hasNext()) {
 						pw.print(iterator.next());
@@ -983,60 +1023,14 @@ public class MainWindow extends JFrame {
 		fileListModel.clear();
 		scriptMap.clear();
 		
-		FileWriter fw;
-		PrintWriter pw;
-		List<String> list = new ArrayList<String>();
-		
 		for(File file: dir.listFiles(new BinFileFilter())) {
 			ScriptParser script = new ScriptParser(file);
-			if(script.getBlockList().size() > 0) {
+			if(script.getConvoMap().size() > 0) {
 				scriptMap.put(script, file);
 				fileListModel.addElement(script);
 				
-				for(ConvoData block : script.getBlockList()) {
-					if(block.getMagic() == ConvoMagic.DIALOGUE) {
-						ExtraInfoConvoData extInfo = (ExtraInfoConvoData) block;
-						//byte[] fourData = ei.getFourBytes();
-						//String fourDataString = String.format("%X %X %X %X", fourData[0], fourData[1], fourData[2], fourData[3]);
-						//String finalString = "";
-						//String speakerByteString = "";
-						
-						if(block.hasExtraInfo) {
-							byte[] speakerBytes = extInfo.getSpeakerBytes();
-							String string = String.format("%X %X %X", speakerBytes[0], speakerBytes[1], speakerBytes[2]) + " " + extInfo.getExtraInfoString();
-							//finalString = ei.getExtraInfoString() + " " + speakerByteString;
-							if(!list.contains(string)) {
-								list.add(string);
-							}
-						}
-						//else {
-						//	finalString = fourDataString;
-						//}
-						//if(!list.contains(finalString)) {
-						//	list.add(finalString);
-						//}
-					}
-				}
 			}
 		}
-		
-		
-		try {
-			fw = new FileWriter("output.txt");
-			pw = new PrintWriter(fw);
-			
-			for(String string : list) {
-				pw.println(string);
-			}
-			
-			pw.close();
-			fw.close();
-		}
-		catch(IOException i) {
-			
-		}
-		
-		
 		fileList.setSelectedIndex(0);
 	}
 	
