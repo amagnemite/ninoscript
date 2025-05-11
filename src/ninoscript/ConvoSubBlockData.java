@@ -15,7 +15,6 @@ public class ConvoSubBlockData {
 	protected boolean hasExtraString = false;
 	protected boolean hasMainString = true;
 	
-	protected byte[] textBytes;
 	protected String textString;
 	protected String newTextString;
 	
@@ -28,7 +27,6 @@ public class ConvoSubBlockData {
 		this.fullBlockLength = fullBlockLength;
 		this.textLength = textLength;
 		this.textStartOffset = textStart; //offset of the text's length
-		this.textBytes = textBytes;
 		
 		try {
 			if(textBytes == null) {
@@ -71,10 +69,6 @@ public class ConvoSubBlockData {
 	public int getTextStart() {
 		return textStartOffset;
 	}
-
-	public byte[] getTextBytes() {
-		return textBytes;
-	}
 	
 	public String getTextString() {
 		return textString;
@@ -102,21 +96,31 @@ public class ConvoSubBlockData {
 	
 	public static class ExtraStringConvoData extends ConvoSubBlockData {
 		//blocks that have an extra string associated, like dialogue's speakers or text entry puzzles with an answer + description
+		
+		public static final int NOSIDE = 0;
+		public static final int RIGHTSIDE = 1;
+		public static final int LEFTSIDE = 2;
+		
 		private int extraStringOffset; //offset of the string's length
 		private int extraStringLength;
-		private byte[] extraStringBytes;
 		
 		private String extraString = null;
 		private String newExtraInfoString;
 		
-		private byte[] speakerBytes;
+		private int speakerSide = -1;
 		
 		public ExtraStringConvoData(ConvoMagic magic, int blockStart, int fullBlockLength, int mainStringLength, int mainStringStart,
 				int extraStringStart, int extraStringLength, byte[] mainStringBytes, byte[] extraStringBytes) {
+			this(magic, blockStart, fullBlockLength, mainStringLength, mainStringStart, extraStringStart, extraStringLength,
+					mainStringBytes, extraStringBytes, -1);
+		}
+		
+		public ExtraStringConvoData(ConvoMagic magic, int blockStart, int fullBlockLength, int mainStringLength, int mainStringStart,
+				int extraStringStart, int extraStringLength, byte[] mainStringBytes, byte[] extraStringBytes, int speakerSide) {
 			super(magic, blockStart, fullBlockLength, mainStringLength, mainStringStart, mainStringBytes);
 			this.extraStringOffset = extraStringStart;
 			this.extraStringLength = extraStringLength;
-			this.extraStringBytes = extraStringBytes;
+			this.speakerSide = speakerSide;
 			
 			if(mainStringBytes == null) {
 				hasMainString = false;
@@ -150,10 +154,6 @@ public class ConvoSubBlockData {
 			return extraStringLength;
 		}
 		
-		public byte[] getExtraInfoBytes() {
-			return extraStringBytes;
-		}
-		
 		public String getExtraInfoString() {
 			return extraString;
 		}
@@ -162,8 +162,8 @@ public class ConvoSubBlockData {
 			this.extraString = extraInfoString;
 		}
 		
-		public byte[] getSpeakerBytes() {
-			return speakerBytes;
+		public int getSpeakerSide() {
+			return speakerSide;
 		}
 	}
 }

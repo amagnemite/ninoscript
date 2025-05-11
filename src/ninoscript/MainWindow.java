@@ -106,7 +106,7 @@ public class MainWindow extends JFrame {
 	JPanel newExtraPanel = new JPanel();
 	
 	private boolean isSpeakerBorder = true;
-	private boolean setText = true;
+	private boolean updateComponents = true;
 	private boolean hideScriptingInfo = false;
 	private boolean showUnusedIDs = false;
 	
@@ -392,13 +392,14 @@ public class MainWindow extends JFrame {
 			
 				//might need a is this file still here check
 				currentScript = fileList.getSelectedValue();
+				populateIDs();
 				
-				setText = false;
+				updateComponents = false;
 				blockSpinnerModel.setMinimum(-1); //really roundabout way of always forcing the first block to be rendered
 				blockSpinnerModel.setValue(-1);
 				blockSpinnerModel.setMaximum(currentConvo.getBlockList().size() - 1);
 				blockSpinnerModel.setMinimum(0);
-				setText = true;
+				updateComponents = true;
 				blockSpinnerModel.setValue(0);
 				
 				blockMaxLabel.setText("of " + (currentConvo.getBlockList().size() - 1));
@@ -409,7 +410,7 @@ public class MainWindow extends JFrame {
 		});
 		
 		blockSpinner.addChangeListener(event -> {
-			if(!setText) {
+			if(!updateComponents) {
 				return;
 			}
 			if(currentBlock != null) {
@@ -452,7 +453,7 @@ public class MainWindow extends JFrame {
 			}
 			
 			public void update(DocumentEvent e) {
-				if(!setText) {
+				if(!updateComponents) {
 					return;
 				}
 				
@@ -527,20 +528,38 @@ public class MainWindow extends JFrame {
 			updateTextComponents();
 		});
 		
-		showUnusedCheck.addItemListener(event -> {
-			idComboModel.removeAllElements();
-			if(scriptingCheck.isSelected()) {
-				idComboModel.addAll(currentScript.getConvoMap().keySet());
+		idCombo.addActionListener(event -> {
+			if(!updateComponents) {
+				return;
 			}
-			else {
-				List<Integer> usedIDs = currentScript.getUsedConvoIDs();
-				for(Entry<Integer, Conversation> entry : currentScript.getConvoMap().entrySet()) {
-					if(usedIDs.contains(entry.getValue().getId())) {
-						idComboModel.addElement(entry.getKey());
+			int index = (int) idCombo.getSelectedItem();
+			
+			if(currentScript != null && currentConvo != null) {
+				for(ConvoSubBlockData block : currentConvo.getBlockList()) {
+					//wipes any new stuff that wasn't saved to file
+					block.setNewTextString(block.getTextString());
+					if(block.hasExtraString()) {
+						((ExtraStringConvoData) block).setNewExtraInfoString(((ExtraStringConvoData) block).getExtraInfoString());
 					}
 				}
 			}
-			idCombo.setSelectedIndex(0);
+		
+			currentConvo = currentScript.getConvoMap().get(index);
+			System.out.println(currentConvo.getId() + " " + Integer.toHexString(currentConvo.getId()));
+			
+			updateComponents = false;
+			blockSpinnerModel.setMinimum(-1); //really roundabout way of always forcing the first block to be rendered
+			blockSpinnerModel.setValue(-1);
+			blockSpinnerModel.setMaximum(currentConvo.getBlockList().size() - 1);
+			blockSpinnerModel.setMinimum(0);
+			updateComponents = true;
+			blockSpinnerModel.setValue(0);
+			
+			blockMaxLabel.setText("of " + (currentConvo.getBlockList().size() - 1));
+		});
+		
+		showUnusedCheck.addItemListener(event -> {
+			populateIDs();
 		});
 		
 		saveFileButton.addActionListener(event -> {
@@ -556,6 +575,24 @@ public class MainWindow extends JFrame {
 			currentFontMap = font12Map;
 			splitString();
 		});
+	}
+	
+	private void populateIDs() {
+		updateComponents = false;
+		idComboModel.removeAllElements();
+		if(showUnusedCheck.isSelected()) {
+			idComboModel.addAll(currentScript.getConvoMap().keySet());
+		}
+		else {
+			List<Integer> usedIDs = currentScript.getUsedConvoIDs();
+			for(Entry<Integer, Conversation> entry : currentScript.getConvoMap().entrySet()) {
+				if(usedIDs.contains(entry.getValue().getId())) {
+					idComboModel.addElement(entry.getKey());
+				}
+			}
+		}
+		updateComponents = true;
+		idCombo.setSelectedIndex(0);
 	}
 	
 	private void findMatchingFiles(File parentDir, File saveDir, String filter) {
