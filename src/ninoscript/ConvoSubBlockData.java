@@ -9,30 +9,27 @@ public class ConvoSubBlockData {
 	//specific chunks of dialogue, other text, etc in a given convo
 	protected ConvoMagic magic;
 	protected int blockStartOffset;
-	protected int fullBlockLength;
+	protected int oldFullBlockLength;
 	protected int textStartOffset;
-	protected int textLength;
+	protected int oldTextLength;
 	protected boolean hasExtraString = false;
 	protected boolean hasMainString = true;
 	
-	protected String textString;
+	protected String textString = "";
 	protected String newTextString;
 	
 	//if this block's text is shared, other matching blocks are in this list
 	protected List<ConvoSubBlockData> sharedStringList = null;
 	
-	public ConvoSubBlockData(ConvoMagic magic, int blockStart, int fullBlockLength, int textLength, int textStart, byte[] textBytes) {
+	public ConvoSubBlockData(ConvoMagic magic, int blockStart, int fullBlockLength, int textStart, byte[] textBytes) {
 		this.magic = magic;
 		this.blockStartOffset = blockStart; //actual start of block, including id and length
-		this.fullBlockLength = fullBlockLength;
-		this.textLength = textLength;
+		this.oldFullBlockLength = fullBlockLength;
 		this.textStartOffset = textStart; //offset of the text's length
+		oldTextLength = textBytes.length;
 		
 		try {
-			if(textBytes == null) {
-				textString = "";
-			}
-			else {
+			if(textBytes != null) {
 				textString = new String(textBytes, "Shift_JIS");
 			}
 		}
@@ -58,12 +55,12 @@ public class ConvoSubBlockData {
 		this.newTextString = newTextString;
 	}
 
-	public int getFullBlockLength() {
-		return fullBlockLength;
+	public int getOldFullBlockLength() {
+		return oldFullBlockLength;
 	}
 
-	public int getTextLength() {
-		return textLength;
+	public int getOldTextLength() {
+		return oldTextLength;
 	}
 
 	public int getTextStart() {
@@ -102,24 +99,23 @@ public class ConvoSubBlockData {
 		public static final int LEFTSIDE = 2;
 		
 		private int extraStringOffset; //offset of the string's length
-		private int extraStringLength;
+		private int oldExtraStringLength;
 		
 		private String extraString = null;
 		private String newExtraInfoString;
 		
 		private int speakerSide = -1;
 		
-		public ExtraStringConvoData(ConvoMagic magic, int blockStart, int fullBlockLength, int mainStringLength, int mainStringStart,
-				int extraStringStart, int extraStringLength, byte[] mainStringBytes, byte[] extraStringBytes) {
-			this(magic, blockStart, fullBlockLength, mainStringLength, mainStringStart, extraStringStart, extraStringLength,
+		public ExtraStringConvoData(ConvoMagic magic, int blockStart, int fullBlockLength, int mainStringStart,
+				int extraStringStart, byte[] mainStringBytes, byte[] extraStringBytes) {
+			this(magic, blockStart, fullBlockLength, mainStringStart, extraStringStart, 
 					mainStringBytes, extraStringBytes, -1);
 		}
 		
-		public ExtraStringConvoData(ConvoMagic magic, int blockStart, int fullBlockLength, int mainStringLength, int mainStringStart,
-				int extraStringStart, int extraStringLength, byte[] mainStringBytes, byte[] extraStringBytes, int speakerSide) {
-			super(magic, blockStart, fullBlockLength, mainStringLength, mainStringStart, mainStringBytes);
+		public ExtraStringConvoData(ConvoMagic magic, int blockStart, int fullBlockLength, int mainStringStart,
+				int extraStringStart, byte[] mainStringBytes, byte[] extraStringBytes, int speakerSide) {
+			super(magic, blockStart, fullBlockLength, mainStringStart, mainStringBytes);
 			this.extraStringOffset = extraStringStart;
-			this.extraStringLength = extraStringLength;
 			this.speakerSide = speakerSide;
 			
 			if(mainStringBytes == null) {
@@ -129,6 +125,7 @@ public class ConvoSubBlockData {
 			try {
 				if(extraStringBytes != null) {
 					extraString = new String(extraStringBytes, "Shift_JIS");
+					oldExtraStringLength = extraStringBytes.length;
 					hasExtraString = true;
 				}
 			}
@@ -150,15 +147,15 @@ public class ConvoSubBlockData {
 			return extraStringOffset;
 		}
 
-		public int getExtraInfoLength() {
-			return extraStringLength;
+		public int getOldExtraInfoLength() {
+			return oldExtraStringLength;
 		}
 		
 		public String getExtraInfoString() {
 			return extraString;
 		}
 
-		public void setExtraInfoSTring(String extraInfoString) {
+		public void setExtraInfoString(String extraInfoString) {
 			this.extraString = extraInfoString;
 		}
 		

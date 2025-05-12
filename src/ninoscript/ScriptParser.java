@@ -38,7 +38,8 @@ public class ScriptParser {
 	
 	private static final int INTERNALSCRIPTNAMEOFFSET = 8;
 	private static final int SECTIONS = 8;
-	private static final int VISUALBLOCKS = 8; //blocks 0-7 of section 5 seem to be visual related
+	//private static final int VISUALBLOCKS = 8; //blocks 0-7 of section 5 seem to be visual related
+	private static final int SINGLECONVOID = 0;
 	private static final Set<Integer> TWOBYTETEXTTYPES = new TreeSet<Integer>(Arrays.asList(0x5, 0x11, 0x26, 0x29, 0x31));
 
 	private boolean isSingleConvo = false;
@@ -93,6 +94,7 @@ public class ScriptParser {
 		
 		fileName = file.getName();
 		
+		int offset = !isSingleConvo ? 4 : 0;
 		if(!isSingleConvo) {
 			scriptNameLength = fullFileBytes[INTERNALSCRIPTNAMEOFFSET] & 0xFF;
 			nameBytes = new byte[scriptNameLength];
@@ -105,129 +107,132 @@ public class ScriptParser {
 			}
 			catch (UnsupportedEncodingException e) {
 			}
-		}
-		
-		int k = 4;
-		for(int j = 0; j < SECTIONS - 1; j++) { //4 after initial magic
-			int length = (fullFileBytes[k] & 0xFF) | (fullFileBytes[k + 1] & 0xFF) << 8 |
-					(fullFileBytes[k + 2] & 0xFF) << 16 | (fullFileBytes[k + 3] & 0xFF) << 24;
 			
-			if(j == 5) {
-				sectionFive = ByteBuffer.allocate(length);
-				sectionFive.order(ByteOrder.LITTLE_ENDIAN);
-				sectionFive.put(fullFileBytes, k + 4, length);
+			for(int j = 0; j < SECTIONS - 1; j++) { //4 after initial magic
+				int length = (fullFileBytes[offset] & 0xFF) | (fullFileBytes[offset + 1] & 0xFF) << 8 |
+						(fullFileBytes[offset + 2] & 0xFF) << 16 | (fullFileBytes[offset + 3] & 0xFF) << 24;
+				
+				if(j == 5) {
+					sectionFive = ByteBuffer.allocate(length);
+					sectionFive.order(ByteOrder.LITTLE_ENDIAN);
+					sectionFive.put(fullFileBytes, offset + 4, length);
+					sectionFive.position(0); //pos gets incremented after puts
+				}
+				offset += 4 + length;
 			}
-			k += 4 + length;
 		}
+		
 		//section 7/convo section doesn't have an overall length
-		sectionSeven = ByteBuffer.allocate(fullFileBytes.length - k);
+		sectionSeven = ByteBuffer.allocate(fullFileBytes.length - offset);
 		sectionSeven.order(ByteOrder.LITTLE_ENDIAN);
-		sectionSeven.put(fullFileBytes, k, fullFileBytes.length - k);
+		sectionSeven.put(fullFileBytes, offset, fullFileBytes.length - offset);
 			
-		//TODO: check to make sure all scripts can have a 5/7
+		//TODO: check to make sure all (non single convo) scripts can have a 5/7
 		
-		sectionFive.position(0); //pos gets incremented after puts
-		sectionSeven.position(0);
+		if(!isSingleConvo) {
+			int flag;
+			int countByte = sectionFive.get() & 0xFF;
 		
-		int flag;
-		int countByte = sectionFive.get() & 0xFF;
-	
-		for(int j = 0; j < countByte; j++) { //subsection one
-			getSubFuncOneLength(sectionFive);
-			sectionFive.position(sectionFive.position() + BLOCKZEROLENGTH);
-		}
-			
-		countByte = sectionFive.get() & 0xFF;
-		for(int j = 0; j < countByte; j++) { //subsection two, npcs
-			//gets read again in func but need to ref here, so don't increment pos	
-			int firstByte = sectionFive.get(sectionFive.position()) & 0xFF;
-			getSubFuncOneLength(sectionFive);
-			sectionFive.position(sectionFive.position() + BLOCKONEPRECONVOLENGTH);		
-			getMultipleArrayLength(sectionFive, BLOCKONESTRINGCOUNT);			
-			getConvoIDs(sectionFive);
-			sectionFive.position(sectionFive.position() + BLOCKONEPOSTCONVOLENGTH);
-			
-			flag = sectionFive.getInt();
-			if((flag & 0x400) != 0) {
-				int loopCount = sectionFive.get() & 0xFF;
-				getMultipleArrayLength(sectionFive, loopCount);
-				if((flag & 0x800) != 0) {
-					System.out.println(fileName + " has 0x800 flag");
+			for(int j = 0; j < countByte; j++) { //subsection one
+				getSubFuncOneLength(sectionFive);
+				sectionFive.position(sectionFive.position() + BLOCKZEROLENGTH);
+			}
+				
+			countByte = sectionFive.get() & 0xFF;
+			for(int j = 0; j < countByte; j++) { //subsection two, npcs
+				//gets read again in func but need to ref here, so don't increment pos	
+				int firstByte = sectionFive.get(sectionFive.position()) & 0xFF;
+				getSubFuncOneLength(sectionFive);
+				sectionFive.position(sectionFive.position() + BLOCKONEPRECONVOLENGTH);		
+				getMultipleArrayLength(sectionFive, BLOCKONESTRINGCOUNT);			
+				getConvoIDs(sectionFive);
+				sectionFive.position(sectionFive.position() + BLOCKONEPOSTCONVOLENGTH);
+				
+				flag = sectionFive.getInt();
+				if((flag & 0x400) != 0) {
+					int loopCount = sectionFive.get() & 0xFF;
+					getMultipleArrayLength(sectionFive, loopCount);
+					if((flag & 0x800) != 0) {
+						System.out.println(fileName + " has 0x800 flag");
+						sectionFive.position(sectionFive.position() + 1);
+					}
+				}
+				if((flag & 0x4000) != 0) {
+					sectionFive.position(sectionFive.position() + 6);
+				}
+				if((flag & 0x8) != 0) {
+					sectionFive.position(sectionFive.position() + 8);
+				}
+				if((flag & 0x8000) != 0) {
+					sectionFive.position(sectionFive.position() + 4);
+				}
+				if((flag & 0x20) != 0) {
+					int length = sectionFive.get() & 0xFF;
+					sectionFive.position(sectionFive.position() + length);
+				}
+				if((flag & 0x100) != 0) {
 					sectionFive.position(sectionFive.position() + 1);
 				}
+				if((flag & 0x200) != 0) {
+					sectionFive.position(sectionFive.position() + 4);
+				}
+				if((flag & 0x10000) != 0) {
+					sectionFive.position(sectionFive.position() + 1);
+				}
+				if(firstByte == 1) {
+					sectionFive.position(sectionFive.position() + 28);
+				}
 			}
-			if((flag & 0x4000) != 0) {
-				sectionFive.position(sectionFive.position() + 6);
+			
+			countByte = sectionFive.get() & 0xFF;
+			for(int j = 0; j < countByte; j++) { //subsection three, map props/other entities
+				parseSubsectionThree(sectionFive);
 			}
-			if((flag & 0x8) != 0) {
-				sectionFive.position(sectionFive.position() + 8);
-			}
-			if((flag & 0x8000) != 0) {
-				sectionFive.position(sectionFive.position() + 4);
-			}
-			if((flag & 0x20) != 0) {
-				int length = sectionFive.get() & 0xFF;
-				sectionFive.position(sectionFive.position() + length);
-			}
-			if((flag & 0x100) != 0) {
+			
+			countByte = sectionFive.get() & 0xFF;
+			for(int j = 0; j < countByte; j++) { //section four, adjacent scripts
+				getSubFuncTwoLength(sectionFive);
+				getArrayLength(sectionFive);
 				sectionFive.position(sectionFive.position() + 1);
+				flag = sectionFive.get() & 0xFF;
+				if(hasFlag(flag, 1 << 3)) {
+					sectionFive.position(sectionFive.position() + 1);
+				}
+				getSubFuncThreeLength(sectionFive);
 			}
-			if((flag & 0x200) != 0) {
-				sectionFive.position(sectionFive.position() + 4);
+			
+			countByte = sectionFive.get() & 0xFF;
+			for(int j = 0; j < countByte; j++) { //section five
+				getSubFuncTwoLength(sectionFive);
+				getConvoIDs(sectionFive);
+				sectionFive.position(sectionFive.position() + 2);
+				getSubFuncThreeLength(sectionFive);
 			}
-			if((flag & 0x10000) != 0) {
-				sectionFive.position(sectionFive.position() + 1);
+			
+			countByte = sectionFive.get() & 0xFF;
+			for(int j = 0; j < countByte; j++) { //section six
+				System.out.println(fileName + " has subsection 6 of section 5");
+				//getSubFuncOneLength(sectionFive);
 			}
-			if(firstByte == 1) {
-				sectionFive.position(sectionFive.position() + 28);
-			}
+			
+			countByte = sectionFive.get() & 0xFF;
+			for(int j = 0; j < countByte; j++) { //section seven
+				System.out.println(fileName + " has subsection 7 of section 5");
+				//note 7 uses 2 count bytes
+			}					
+		}
+		else {
+			usedConvoIDs.add(SINGLECONVOID);
 		}
 		
-		countByte = sectionFive.get() & 0xFF;
-		for(int j = 0; j < countByte; j++) { //subsection three, map props/other entities
-			parseSubsectionThree(sectionFive);
-		}
-		
-		countByte = sectionFive.get() & 0xFF;
-		for(int j = 0; j < countByte; j++) { //section four, adjacent scripts
-			getSubFuncTwoLength(sectionFive);
-			getArrayLength(sectionFive);
-			sectionFive.position(sectionFive.position() + 1);
-			flag = sectionFive.get() & 0xFF;
-			if(hasFlag(flag, 1 << 3)) {
-				sectionFive.position(sectionFive.position() + 1);
-			}
-			getSubFuncThreeLength(sectionFive);
-		}
-		
-		countByte = sectionFive.get() & 0xFF;
-		for(int j = 0; j < countByte; j++) { //section five
-			getSubFuncTwoLength(sectionFive);
-			getConvoIDs(sectionFive);
-			sectionFive.position(sectionFive.position() + 2);
-			getSubFuncThreeLength(sectionFive);
-		}
-		
-		countByte = sectionFive.get() & 0xFF;
-		for(int j = 0; j < countByte; j++) { //section six
-			System.out.println(fileName + " has subsection 6 of section 5");
-			//getSubFuncOneLength(sectionFive);
-		}
-		
-		countByte = sectionFive.get() & 0xFF;
-		for(int j = 0; j < countByte; j++) { //section seven
-			System.out.println(fileName + " has subsection 7 of section 5");
-			//note 7 uses 2 count bytes
-		}					
-					
+		sectionSeven.position(0);
 		int definitionIndex = 0; //convos as they're listed in the script, not their id
-		int convoID = sectionSeven.getInt();
+		int convoID = !isSingleConvo ? sectionSeven.getInt() : SINGLECONVOID;
 		
 		while(convoID != -1) {
-			System.out.println("convo id: " + convoID);
 			List<ConvoSubBlockData> blockList = new ArrayList<ConvoSubBlockData>();
 			int startPos = sectionSeven.position();
-			int convoLength = sectionSeven.getInt();
+			int convoLength = !isSingleConvo ? sectionSeven.getInt() : fullFileBytes.length - 4;
 			int finalPos = sectionSeven.position() + convoLength;
 			sectionSeven.position(sectionSeven.position() + 4); //magic 0A 09 19 00
 			
@@ -241,17 +246,17 @@ public class ScriptParser {
 				}
 				switch(subBlockType) {
 					case 0x05: //regular dialogue		
-						data = parseTextBlock(sectionSeven);
+						data = parseTextBlock(sectionSeven, offset);
 						blockList.add(data);
 						checkIfStringExists(data);
 						break;
 					case 0x26: //non conversation text (sidequest prompts, etc)		
-						data = parseNonDialogue(sectionSeven);
+						data = parseNonDialogue(sectionSeven, offset);
 						blockList.add(data);
 						checkIfStringExists(data);
 						break;
 					case 0x31: //text entry puzzle				
-						data = parseTextEntry(sectionSeven);
+						data = parseTextEntry(sectionSeven, offset);
 						blockList.add(data);
 						break;
 					case 0x29:
@@ -263,10 +268,10 @@ public class ScriptParser {
 				}
 			}
 			if(blockList.size() > 0) {
-				convoMap.put(definitionIndex, new Conversation(convoID, startPos, convoLength, blockList));
+				convoMap.put(definitionIndex, new Conversation(convoID, offset + startPos, convoLength, blockList));
 				definitionIndex++;
 			}
-			convoID = sectionSeven.getInt();
+			convoID = !isSingleConvo ? sectionSeven.getInt() : -1;
 		}
 	}
 	
@@ -549,16 +554,16 @@ public class ScriptParser {
 		}
 	}
 	
-	private ConvoSubBlockData parseTextBlock(ByteBuffer buffer) {
+	private ConvoSubBlockData parseTextBlock(ByteBuffer buffer, int fullOffset) {
 		//TODO: may want to do something about char 0x1c, which the jpn ver seems to use and sometimes appears in scripts
 		final int SPRITEFLAG = 1 << 0;
 		final int UNKNOWNFLAG1 = (1 << 11) + (1 << 1);
 		final int UNKNOWNSUBFLAG1 = 1 << 11;
 		final int UNKNOWNFLAG2 = 1 << 2;
-		final int UNKNOWNFLAG3 = 1 << 3;
+		final int SPEAKERDIRECTIONFLAG = 1 << 3;
 		final int UNKNOWNFLAG4 = 1 << 4;
 		final int UNKNOWNFLAG5 = 1 << 5;
-		final int SPEAKERFLAG = 1 << 6;
+		final int SPEAKERNAMEFLAG = 1 << 6;
 		final int UNKNOWNFLAG6 = 1 << 7;
 		final int STRINGFLAG = (1 << 14) + (1 << 8);
 		final int UNKNOWNSUBFLAG2 = 1 << 8;
@@ -566,21 +571,20 @@ public class ScriptParser {
 		final int UNKNOWNFLAG8 = 1 << 13;
 		
 		//should be pointing at the length already;
-		int start = buffer.position() - 1;
+		int start = buffer.position() - 1 + fullOffset;
 		byte[] textBytes;
 		byte[] speakerBytes = null;
-		int speakerLength = -1;
 		int speakerStart = -1;
+		int speakerDirectionByte = -1;
 		
 		int fullBlockLength = buffer.getShort();
 		int mysteryByte = buffer.get() & 0xFF;
 		if(mysteryByte != 1) {
 			System.out.println(fileName + " has non one count? byte in text block");
 		}
-		//buffer.position(buffer.position() + 1); //skip the byte between lengths
 		
+		int textStart = buffer.position() + fullOffset;
 		int textLength = buffer.getShort();
-		int textStart = buffer.position();
 		
 		textBytes = new byte[textLength];
 		buffer.get(textBytes);
@@ -602,8 +606,8 @@ public class ScriptParser {
 		if(hasFlag(flag, UNKNOWNFLAG2)) {
 			buffer.position(buffer.position() + 1);
 		}
-		if(hasFlag(flag, UNKNOWNFLAG3)) {
-			buffer.position(buffer.position() + 1);
+		if(hasFlag(flag, SPEAKERDIRECTIONFLAG)) {
+			speakerDirectionByte = buffer.get() & 0xFF;
 		}
 		if(hasFlag(flag, UNKNOWNFLAG4)) {
 			buffer.position(buffer.position() + 1);
@@ -611,8 +615,8 @@ public class ScriptParser {
 		if(hasFlag(flag, UNKNOWNFLAG5)) {
 			buffer.position(buffer.position() + 2);
 		}
-		if(hasFlag(flag, SPEAKERFLAG)) {
-			speakerStart = buffer.position();
+		if(hasFlag(flag, SPEAKERNAMEFLAG)) {
+			speakerStart = buffer.position() + fullOffset;
 			int length = buffer.get() & 0xFF;
 			speakerBytes = new byte[length];
 			buffer.get(speakerBytes);
@@ -637,18 +641,18 @@ public class ScriptParser {
 			buffer.position(buffer.position() + 4 * count);
 		}
 	
-		return new ExtraStringConvoData(ConvoMagic.DIALOGUE, start, fullBlockLength, textLength, textStart, speakerStart, speakerLength,
-				textBytes, speakerBytes);
+		return new ExtraStringConvoData(ConvoMagic.DIALOGUE, start, fullBlockLength, textStart, speakerStart,
+				textBytes, speakerBytes, speakerDirectionByte);
 	}
 	
-	private ConvoSubBlockData parseNonDialogue(ByteBuffer buffer) {
+	private ConvoSubBlockData parseNonDialogue(ByteBuffer buffer, int fullOffset) {
 		int UNKNOWNFLAG1 = 0x3;
 		int UNKNOWNFLAG2 = 1 << 6;
 		int UNKNOWNFLAG3 = 1 << 7;
 		int UNKNOWNFLAG4 = 1 << 2;
 		
 		//starts at full length
-		int start = buffer.position() - 1;
+		int start = buffer.position() - 1 + fullOffset;
 		
 		int fullBlockLength = buffer.getShort();
 		int mysteryByte = buffer.get() & 0xFF;
@@ -656,7 +660,7 @@ public class ScriptParser {
 			System.out.println(fileName + " has non one count? byte in nondialogue block");
 		}
 		//buffer.position(buffer.position() + 1); //skip the byte between lengths
-		int textStart = buffer.position();
+		int textStart = buffer.position() + fullOffset;
 		int textLength = buffer.get() & 0xFF;
 		
 		byte[] textBytes = new byte[textLength];
@@ -678,13 +682,13 @@ public class ScriptParser {
 			buffer.position(buffer.position() + 1);
 		}
 		
-		return new ConvoSubBlockData(ConvoMagic.NONDIALOGUE, start, fullBlockLength, textLength, textStart, textBytes);
+		return new ConvoSubBlockData(ConvoMagic.NONDIALOGUE, start, fullBlockLength, textStart, textBytes);
 	}
 	
-	private ConvoSubBlockData parseTextEntry(ByteBuffer buffer) {
+	private ConvoSubBlockData parseTextEntry(ByteBuffer buffer, int fullOffset) {
 		final int UNKNOWNFLAG = 1 << 0;
 		
-		int start = buffer.position() - 1;
+		int start = buffer.position() - 1 + fullOffset;
 		int fullBlockLength = buffer.getShort();
 		byte[] answerBytes;
 		byte[] descriptionBytes = null;
@@ -705,13 +709,13 @@ public class ScriptParser {
 		int stringCount = buffer.get() & 0xFF;
 		
 		//some text entries only have the answer with a generic "enter the answer" prompt and no description
-		answerStart = buffer.position();
+		answerStart = buffer.position() + fullOffset;
 		answerLength = buffer.getShort();
 		answerBytes = new byte[answerLength];
 		buffer.get(answerBytes);
 		
 		if(stringCount == 2) {
-			descriptionStart = buffer.position();
+			descriptionStart = buffer.position() + fullOffset;
 			descriptionLength = buffer.getShort();
 			descriptionBytes = new byte[descriptionLength];
 			buffer.get(descriptionBytes);
@@ -720,7 +724,7 @@ public class ScriptParser {
 			System.out.println(fileName + " has text entry with 3+ strings");
 		}
 		
-		return new ExtraStringConvoData(ConvoMagic.TEXTENTRY, start, fullBlockLength, descriptionLength, descriptionStart, answerStart, answerLength,
+		return new ExtraStringConvoData(ConvoMagic.TEXTENTRY, start, fullBlockLength, descriptionStart, answerStart, 
 				descriptionBytes, answerBytes);
 	}
 	
@@ -744,10 +748,9 @@ public class ScriptParser {
 		return usedConvoIDs;
 	}
 	
-	public static class Conversation {
-		//this is the index of the length, 4b before 0A 09 19 00
+	public static class Conversation {	
 		private int id;
-		private int startOffset;
+		private int startOffset; //this is the offset of the length, 4b before 0A 09 19 00
 		private int length;
 		private List<ConvoSubBlockData> blockList;
 		

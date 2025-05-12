@@ -107,8 +107,6 @@ public class MainWindow extends JFrame {
 	
 	private boolean isSpeakerBorder = true;
 	private boolean updateComponents = true;
-	private boolean hideScriptingInfo = false;
-	private boolean showUnusedIDs = false;
 	
 	private Map<String, Integer> currentFontMap = null;
 	private Map<String, Integer> font10Map = null;
@@ -524,7 +522,6 @@ public class MainWindow extends JFrame {
 		});
 		
 		scriptingCheck.addItemListener(event -> {
-			hideScriptingInfo = scriptingCheck.isSelected();
 			updateTextComponents();
 		});
 		
@@ -629,7 +626,7 @@ public class MainWindow extends JFrame {
 	private void updateTextComponents() {
 		ConvoMagic magic = currentBlock.getMagic();
 		
-		if(!hideScriptingInfo) {
+		if(!scriptingCheck.isSelected()) {
 			originalText.setText(currentBlock.getTextString());
 		}
 		else {
@@ -819,8 +816,7 @@ public class MainWindow extends JFrame {
 			return;
 		}
 		
-		for(Entry<Integer, Conversation> entry : currentScript.getConvoMap().entrySet()) {
-			Conversation convo = entry.getValue();
+		for(Conversation convo : currentScript.getConvoMap().values()) {
 			int newConvoSize = 0;
 			int oldTotalBlocksSize = 0;
 			int newTotalBlocksSize = 0;
@@ -829,7 +825,7 @@ public class MainWindow extends JFrame {
 			
 			//first loop to get the new overall convo size
 			for(ConvoSubBlockData block : convo.getBlockList()) {
-				oldTotalBlocksSize += block.getFullBlockLength();
+				oldTotalBlocksSize += block.getOldFullBlockLength();
 				int extraInfoSizeDiff = 0;
 				byte[] newStringBytes = null;
 				byte[] newExtraInfoBytes = null;
@@ -837,14 +833,14 @@ public class MainWindow extends JFrame {
 					newStringBytes = block.getNewTextString().getBytes("Shift-JIS");
 					if(block.hasExtraString()) {
 						newExtraInfoBytes = ((ExtraStringConvoData) block).getNewExtraInfoString().getBytes("Shift-JIS");
-						extraInfoSizeDiff = newExtraInfoBytes.length - ((ExtraStringConvoData) block).getExtraInfoLength();
+						extraInfoSizeDiff = newExtraInfoBytes.length - ((ExtraStringConvoData) block).getOldExtraInfoLength();
 						extraDataMap.put(block, newExtraInfoBytes);
 					}
 				}
 				catch (UnsupportedEncodingException e) {
 				}
 				
-				newTotalBlocksSize += block.getFullBlockLength() + (newStringBytes.length - block.getTextLength()) + extraInfoSizeDiff;
+				newTotalBlocksSize += block.getOldFullBlockLength() + (newStringBytes.length - block.getOldTextLength()) + extraInfoSizeDiff;
 				blockMap.put(block, newStringBytes);
 			}
 			newConvoSize = (convo.getLength() - oldTotalBlocksSize) + newTotalBlocksSize;
@@ -854,7 +850,7 @@ public class MainWindow extends JFrame {
 				if(convo.getStartOffset() != 0) {
 					fw.write(fullFileBytes, originalFileIndex, convo.getStartOffset() - originalFileIndex);
 					
-					fw.write(fourByteBuffer.putInt(newConvoSize).array());				
+					fw.write(fourByteBuffer.putInt(0, newConvoSize).array());
 					fw.write(CONVERSATIONMARKER);
 					
 					originalFileIndex += (convo.getStartOffset() - originalFileIndex) + 8;
@@ -876,27 +872,31 @@ public class MainWindow extends JFrame {
 				
 				if(block.hasExtraString()) {
 					extraInfoBytes = extraDataMap.get(block);
-					extraInfoSizeDiff = extraInfoBytes.length - ((ExtraStringConvoData) block).getExtraInfoLength();
+					extraInfoSizeDiff = extraInfoBytes.length - ((ExtraStringConvoData) block).getOldExtraInfoLength();
 				}
-				newBlockLength = block.getFullBlockLength() + (stringBytes.length - block.getTextLength()) + extraInfoSizeDiff;
+				newBlockLength = block.getOldFullBlockLength() + (stringBytes.length - block.getOldTextLength()) + extraInfoSizeDiff;
 				
 				try {
 					//write everything up to this block
 					fw.write(fullFileBytes, originalFileIndex, block.getBlockStart() - originalFileIndex);
-					ConvoMagic magic = block.getMagic();
 					
+					originalFileIndex += (block.getBlockStart() - originalFileIndex);
+					
+					ConvoMagic magic = block.getMagic();
 					fw.write(block.getMagic().getValue());
-					fw.write(twoByteBuffer.putShort((short) newBlockLength).array()); //new overall block length
+					fw.write(twoByteBuffer.putShort(0, (short) newBlockLength).array()); //new overall block length
 					
 					originalFileIndex += 3;
 					
 					//write everything between the full length and the text length
 					fw.write(fullFileBytes, originalFileIndex, block.getTextStart() - originalFileIndex);
 					
+					originalFileIndex += block.getTextStart() - originalFileIndex;
+					
 					//text length
 					switch(magic) {
 						case DIALOGUE:
-							fw.write(twoByteBuffer.putShort((short) stringBytes.length).array()); //new length
+							fw.write(twoByteBuffer.putShort(0, (short) stringBytes.length).array()); //new length
 							originalFileIndex += 2;
 							break;			
 						case NONDIALOGUE: //nondialogue can only be 1 byte length long
@@ -904,7 +904,7 @@ public class MainWindow extends JFrame {
 							originalFileIndex++;
 							break;
 						case TEXTENTRY:
-							fw.write(twoByteBuffer.putShort((short) extraInfoBytes.length).array()); //new length
+							fw.write(twoByteBuffer.putShort(0, (short) extraInfoBytes.length).array()); //new length
 							originalFileIndex += 2;
 							break;
 					}
@@ -914,25 +914,25 @@ public class MainWindow extends JFrame {
 						case DIALOGUE:
 						case NONDIALOGUE:
 							fw.write(stringBytes);
-							originalFileIndex += block.getTextLength();
+							originalFileIndex += block.getOldTextLength();
 							if(block.hasExtraString()) {
 								fw.write(fullFileBytes, originalFileIndex, ((ExtraStringConvoData) block).getExtraInfoStart() - originalFileIndex);	
 								
 								fw.write(extraInfoBytes.length);
 								fw.write(extraInfoBytes);
 								
-								originalFileIndex += (((ExtraStringConvoData) block).getExtraInfoStart() - originalFileIndex) + 1 + ((ExtraStringConvoData) block).getExtraInfoLength();
+								originalFileIndex += (((ExtraStringConvoData) block).getExtraInfoStart() - originalFileIndex) + 1 + ((ExtraStringConvoData) block).getOldExtraInfoLength();
 							}
 							break;
 						case TEXTENTRY:
 							fw.write(extraInfoBytes);
-							originalFileIndex += ((ExtraStringConvoData) block).getExtraInfoLength();
+							originalFileIndex += ((ExtraStringConvoData) block).getOldExtraInfoLength();
 							if(block.hasMainString()) { //text entry strings are placed end to end
-								fw.write(twoByteBuffer.putShort((short) stringBytes.length).array());
+								fw.write(twoByteBuffer.putShort(0, (short) stringBytes.length).array());
 								fw.write(stringBytes);
-								originalFileIndex += (block.getTextStart() - originalFileIndex) + 2 + block.getTextLength();
+								originalFileIndex += (block.getTextStart() - originalFileIndex) + 2 + block.getOldTextLength();
 							}
-							
+							break;
 					}
 				}
 				catch (IOException e) {
