@@ -54,6 +54,7 @@ import javax.swing.text.BadLocationException;
 import javax.swing.text.Document;
 
 import n2dhandler.N2D;
+import n2dhandler.TileMaker;
 import ninoscript.ConvoSubBlockData.*;
 import ninoscript.ScriptParser.Conversation;
 import ninoscript.ScriptParser.ConvoMagic;
@@ -76,10 +77,13 @@ public class MainWindow extends JFrame {
 	JMenu utilitiesMenu = new JMenu("Utilities");
 	JMenuItem findAllMatches = new JMenuItem("Find all matches");
 	JMenuItem generateN2DImage = new JMenuItem("Generate images from .n2d");
+	JMenuItem tileMaker = new JMenuItem("Make tiles from images");
 	
 	DefaultListModel<ScriptParser> fileListModel = new DefaultListModel<ScriptParser>();
 	SpinnerNumberModel blockSpinnerModel = new SpinnerNumberModel(0, 0, null, 1);
 	JLabel blockMaxLabel = new JLabel("of 0");
+	
+	JLabel sideLabel = new JLabel("");
 	
 	JList<ScriptParser> fileList = new JList<ScriptParser>(fileListModel);
 	JSpinner blockSpinner = new JSpinner(blockSpinnerModel);
@@ -104,6 +108,9 @@ public class MainWindow extends JFrame {
 	
 	JPanel originalExtraPanel = new JPanel();
 	JPanel newExtraPanel = new JPanel();
+	
+	JPanel regularTextPanel = new JPanel();
+	JPanel multipleChoicePanel = new JPanel();
 	
 	private boolean isSpeakerBorder = true;
 	private boolean updateComponents = true;
@@ -133,6 +140,7 @@ public class MainWindow extends JFrame {
 		
 		utilitiesMenu.add(findAllMatches);
 		utilitiesMenu.add(generateN2DImage);
+		utilitiesMenu.add(tileMaker);
 		menuBar.add(utilitiesMenu);
 		setJMenuBar(menuBar);
 		
@@ -188,10 +196,7 @@ public class MainWindow extends JFrame {
 		c.gridx = GridBagConstraints.RELATIVE;
 		c.ipadx = 10;
 		idPanel.add(idCombo, c);
-		//c.gridx = GridBagConstraints.RELATIVE;
-		//c.ipadx = 5;
-		//idPanel.add(showUnusedCheck, c);
-
+		
 		JPanel originalTextPanel = new JPanel();
 		originalTextPanel.setLayout(new GridBagLayout());
 		c = new GridBagConstraints();
@@ -229,6 +234,25 @@ public class MainWindow extends JFrame {
 		newExtraPanel.setBorder(BorderFactory.createTitledBorder(NEWSPEAKER));
 		newExtraPanel.add(newExtraField);
 		
+		c = new GridBagConstraints();
+		regularTextPanel.setLayout(new GridBagLayout());
+		c.anchor = GridBagConstraints.NORTHWEST;
+		c.gridx = 0;
+		c.gridy = 0;
+		c.gridheight = 2;
+		regularTextPanel.add(originalTextPanel, c);
+		c.gridy = GridBagConstraints.RELATIVE;
+		regularTextPanel.add(newTextPanel, c);
+		
+		c.gridx = 1;
+		c.gridy = 0;
+		c.gridheight = 1;
+		regularTextPanel.add(originalExtraPanel, c);
+		c.gridy = GridBagConstraints.RELATIVE;
+		regularTextPanel.add(sideLabel, c);
+		c.gridy = GridBagConstraints.RELATIVE;
+		regularTextPanel.add(newExtraPanel, c);
+		
 		JScrollPane fileScroll = new JScrollPane(fileList);
 		fileScroll.setMinimumSize(new Dimension(fileList.getPreferredScrollableViewportSize().width, 
 				fileList.getPreferredScrollableViewportSize().height));
@@ -249,20 +273,19 @@ public class MainWindow extends JFrame {
 		
 		addGB(scriptingCheck, GridBagConstraints.RELATIVE, 1);
 		
-		gbcon.gridwidth = 2;
-		addGB(originalTextPanel, 1, 2);
-		addGB(newTextPanel, 1, GridBagConstraints.RELATIVE);
+		//widht 2
+		gbcon.gridwidth = 3;
+		addGB(regularTextPanel, 1, GridBagConstraints.RELATIVE);
 		
 		gbcon.gridwidth = 1;
 		addGB(saveFileButton, 1, GridBagConstraints.RELATIVE);
 		
-		gbcon.anchor = GridBagConstraints.NORTHWEST;
-		addGB(originalExtraPanel, 3, 2);
-		addGB(newExtraPanel, 3, GridBagConstraints.RELATIVE);
-		
 		initListeners();
 		originalText.setPreferredSize(getSize());
 		newText.setPreferredSize(getSize());
+		
+		multipleChoicePanel.setVisible(false);
+		multipleChoicePanel.setPreferredSize(regularTextPanel.getPreferredSize());
 		
 		setVisible(true);
 		setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
@@ -372,6 +395,26 @@ public class MainWindow extends JFrame {
 					}
 				}
 			}
+		});
+		
+		tileMaker.addActionListener(event -> {
+			JFileChooser c = new JFileChooser();
+			c.setFileFilter(new PNGFileFilter());
+			c.setMultiSelectionEnabled(true);
+			c.showOpenDialog(this);
+			File[] targetFiles = c.getSelectedFiles();
+			
+			
+			c.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
+			c.setFileFilter(null);
+			c.setMultiSelectionEnabled(false);
+			c.showSaveDialog(this);
+			File saveDir = c.getSelectedFile();
+			
+			if(saveDir == null) {
+				saveDir = targetFiles[0].getParentFile();
+			}
+			TileMaker.makeTiles(targetFiles, saveDir);
 		});
 		
 		fileList.addListSelectionListener(event -> {
@@ -665,9 +708,25 @@ public class MainWindow extends JFrame {
 		newText.setText(currentBlock.getNewTextString());
 		
 		if(currentBlock.hasExtraString()) {
-			originalExtraField.setText(((ExtraStringConvoData) currentBlock).getExtraInfoString());
-			newExtraField.setText(((ExtraStringConvoData) currentBlock).getNewExtraInfoString());
+			ExtraStringConvoData extra = (ExtraStringConvoData) currentBlock;
+			
+			originalExtraField.setText(extra.getExtraInfoString());
+			newExtraField.setText(extra.getNewExtraInfoString());
 			newExtraField.setEnabled(true);
+			
+			if(extra.getSpeakerSide() != -1) {
+				switch(extra.getSpeakerSide()) {
+					case ExtraStringConvoData.NOSIDE:
+						sideLabel.setText("NO SIDE");
+						break;
+					case ExtraStringConvoData.RIGHTSIDE:
+						sideLabel.setText("RIGHT SIDE");
+						break;
+					case ExtraStringConvoData.LEFTSIDE:
+						sideLabel.setText("LEFT SIDE");
+						break;
+				}
+			}
 			
 			if(isSpeakerBorder && magic == ConvoMagic.TEXTENTRY) {
 				originalExtraPanel.setBorder(BorderFactory.createTitledBorder(ORIGINALANSWER));
@@ -687,6 +746,7 @@ public class MainWindow extends JFrame {
 			originalExtraField.setText("");
 			newExtraField.setText("");
 			newExtraField.setEnabled(false);
+			sideLabel.setText("");
 		}
 		
 		if(magic == ConvoMagic.TEXTENTRY && !currentBlock.hasMainString()) {
@@ -1144,6 +1204,33 @@ public class MainWindow extends JFrame {
 		}
 	}
 	
+	public class MultipleChoicePanel extends JPanel {
+		private JTextField originalText = new JTextField();
+		private JTextField newText = new JTextField();
+		
+		public MultipleChoicePanel(String text) {
+			originalText.setEditable(false);
+			originalText.setText(text);
+			
+			originalText.setBorder(BorderFactory.createTitledBorder("Original text"));
+			newText.setBorder(BorderFactory.createTitledBorder("Original text"));
+			
+			setLayout(new GridBagLayout());
+			GridBagConstraints c = new GridBagConstraints();
+			
+			c.gridx = 0;
+			c.gridy = 0;
+			add(originalText, c);
+			
+			c.gridy = GridBagConstraints.RELATIVE;
+			add(newText, c);
+		}
+		
+		public String getNewText() {
+			return newText.getText();
+		}
+	}
+	
 	public static class NoDeselectionModel extends DefaultListSelectionModel {
 	    public void removeSelectionInterval(int index0, int index1) {
 	    	//intentionally does nothing
@@ -1200,6 +1287,32 @@ public class MainWindow extends JFrame {
 
 		public String getDescription() {
 			return ".n2d";
+		}	
+	}
+	
+	public static class PNGFileFilter extends FileFilter {
+		public boolean accept(File file) {
+			if(file.isDirectory()) {
+				return true;
+			}
+			
+			String extension = file.getName();
+			int i = extension.lastIndexOf('.');
+			if (i > 0 && i < extension.length() - 1) {
+				extension = extension.substring(i+1).toLowerCase();
+	        }
+			else {
+				return false;
+			}
+			
+			if(extension.equals("png")) {
+				return true;
+			}
+			return false;
+		}
+
+		public String getDescription() {
+			return ".png";
 		}	
 	}
 }

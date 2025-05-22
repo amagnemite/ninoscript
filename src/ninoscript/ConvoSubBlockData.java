@@ -1,6 +1,7 @@
 package ninoscript;
 
 import java.io.UnsupportedEncodingException;
+import java.util.ArrayList;
 import java.util.List;
 
 import ninoscript.ScriptParser.ConvoMagic;
@@ -26,11 +27,11 @@ public class ConvoSubBlockData {
 		this.blockStartOffset = blockStart; //actual start of block, including id and length
 		this.oldFullBlockLength = fullBlockLength;
 		this.textStartOffset = textStart; //offset of the text's length
-		oldTextLength = textBytes.length;
 		
 		try {
 			if(textBytes != null) {
 				textString = new String(textBytes, "Shift_JIS");
+				oldTextLength = textBytes.length;
 			}
 		}
 		catch (UnsupportedEncodingException e) {
@@ -162,5 +163,27 @@ public class ConvoSubBlockData {
 		public int getSpeakerSide() {
 			return speakerSide;
 		}
+	}
+	
+	public static class MultipleChoiceConvoData extends ConvoSubBlockData {
+		int choicesStart;
+		List<String> originalStrings = new ArrayList<String>();
+		List<String> newStrings = new ArrayList<String>();
+		List<Integer> originalStringLengths = new ArrayList<Integer>();
+		
+		public MultipleChoiceConvoData(ConvoMagic magic, int blockStart, int fullBlockLength, int choicesStart, List<byte[]> stringBytes) {
+			super(magic, blockStart, fullBlockLength, -1, null);
+			this.choicesStart = choicesStart;
+			try {
+				for(byte[] bytes : stringBytes) {
+					originalStrings.add(new String(bytes, "Shift_JIS"));
+					originalStringLengths.add(bytes.length);
+				}
+			}
+			catch (UnsupportedEncodingException e) {
+			}
+			newStrings.addAll(originalStrings);
+		}
+		
 	}
 }
