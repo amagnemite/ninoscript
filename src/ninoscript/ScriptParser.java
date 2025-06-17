@@ -605,8 +605,7 @@ public class ScriptParser {
 				break;
 			case 0xE:
 				buffer.position(buffer.position() + 4);
-				int stringLength = buffer.get() & 0xFF;
-				buffer.position(buffer.position() + stringLength);
+				getArrayLength(buffer);
 				flag = buffer.getShort();
 				if(hasFlag(flag, 1 << 2)) {
 					buffer.position(buffer.position() + 1);
@@ -714,6 +713,7 @@ public class ScriptParser {
 		final int UNKNOWNFLAG6 = 1 << 7;
 		final int STRINGFLAG = (1 << 14) + (1 << 8);
 		final int UNKNOWNSUBFLAG2 = 1 << 8;
+		final int UNKNOWNSUBFLAG3 = 1 << 9;
 		final int UNKNOWNFLAG7 = 1 << 12;
 		final int UNKNOWNFLAG8 = 1 << 13;
 		
@@ -775,10 +775,12 @@ public class ScriptParser {
 			int count = buffer.get() & 0xFF;
 			for(int i = 0; i < count; i++) {
 				if(hasFlag(flag, UNKNOWNSUBFLAG2)) {
-					int length = buffer.get() & 0xFF;
-					buffer.position(buffer.position() + length);
+					getArrayLength(buffer);
 				}
 				buffer.position(buffer.position() + 2);
+			}
+			if(hasFlag(flag, UNKNOWNSUBFLAG3)) {
+				buffer.position(buffer.position() + 2 + 2);
 			}
 		}
 		if(hasFlag(flag, UNKNOWNFLAG7)) {
@@ -892,6 +894,10 @@ public class ScriptParser {
 		buffer.position(buffer.position() + 1);
 		int choicesStart = buffer.position();
 		int count = buffer.get() & 0xFF;
+		
+		if(count > 3) {
+			System.out.println(count + " multiple choice");
+		}
 		
 		for(int i = 0; i < count; i++) {
 			int answerLength = buffer.getShort();

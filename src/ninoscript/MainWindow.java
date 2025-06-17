@@ -14,14 +14,12 @@ import java.io.UnsupportedEncodingException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 
-import javax.swing.BorderFactory;
 import javax.swing.ButtonGroup;
 import javax.swing.DefaultComboBoxModel;
 import javax.swing.DefaultListModel;
@@ -61,12 +59,6 @@ import ninoscript.ScriptParser.ConvoMagic;
 
 @SuppressWarnings("serial")
 public class MainWindow extends JFrame {
-	private static final int MAXLINES = 6;
-	private static final String ORIGINALSPEAKER = "Original speaker";
-	private static final String NEWSPEAKER = "Modified speaker";
-	private static final String ORIGINALANSWER = "Original answer";
-	private static final String NEWANSWER = "Modified answer";
-	
 	JMenuBar menuBar = new JMenuBar();
 	JMenu optionsMenu = new JMenu("Options");
 	JMenuItem loadFiles = new JMenuItem("Load");
@@ -83,36 +75,25 @@ public class MainWindow extends JFrame {
 	SpinnerNumberModel blockSpinnerModel = new SpinnerNumberModel(0, 0, null, 1);
 	JLabel blockMaxLabel = new JLabel("of 0");
 	
-	JLabel sideLabel = new JLabel("");
-	
 	JList<ScriptParser> fileList = new JList<ScriptParser>(fileListModel);
 	JSpinner blockSpinner = new JSpinner(blockSpinnerModel);
-	JTextArea originalText = new JTextArea(6, 35);
+	
 	JList<Integer> originalTextLenLists = new JList<Integer>();
-	JTextArea newText = new JTextArea(6, 35);
+	
 	JList<Integer> newTextLenLists = new JList<Integer>();
-	JTextField originalExtraField = new JTextField(10);
-	JTextField newExtraField = new JTextField(10);
 	JCheckBox scriptingCheck = new JCheckBox("Hide extra text data");
 	
-	JCheckBox showUnusedCheck = new JCheckBox("Show unused convos");
-	DefaultComboBoxModel<Integer> idComboModel = new DefaultComboBoxModel<Integer>();
-	JComboBox<Integer> idCombo = new JComboBox<Integer>(idComboModel);
+	DefaultComboBoxModel<String> idComboModel = new DefaultComboBoxModel<String>();
+	JComboBox<String> idCombo = new JComboBox<String>(idComboModel);
 	
 	ButtonGroup fontGroup = new ButtonGroup();
 	JRadioButton f10Button = new JRadioButton("font10");
 	JRadioButton f12Button = new JRadioButton("font12");
 	
-	LengthPanel originalLengths = new LengthPanel();
-	LengthPanel newLengths = new LengthPanel();
+	RegularTextPanel regularTextPanel = new RegularTextPanel();
+	MultipleChoicePanel multipleChoicePanel = new MultipleChoicePanel();
+	DataPanel currentPanel = regularTextPanel;
 	
-	JPanel originalExtraPanel = new JPanel();
-	JPanel newExtraPanel = new JPanel();
-	
-	JPanel regularTextPanel = new JPanel();
-	JPanel multipleChoicePanel = new JPanel();
-	
-	private boolean isSpeakerBorder = true;
 	private boolean updateComponents = true;
 	
 	private Map<String, Integer> currentFontMap = null;
@@ -123,8 +104,6 @@ public class MainWindow extends JFrame {
 	private ScriptParser currentScript = null;
 	private Conversation currentConvo;
 	private ConvoSubBlockData currentBlock;
-	private String currentString;
-	private List<Integer> newLineLocs = new ArrayList<Integer>();
 	
 	private GridBagConstraints gbcon = new GridBagConstraints();
 	
@@ -146,18 +125,6 @@ public class MainWindow extends JFrame {
 		
 		fileList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
 		fileList.setSelectionModel(new NoDeselectionModel());
-		
-		originalText.setEditable(false);
-		originalText.setOpaque(false);
-		originalExtraField.setEditable(false);
-		
-		originalText.setMinimumSize(originalText.getPreferredSize());
-		newText.setMinimumSize(newText.getPreferredSize());
-		originalExtraField.setMinimumSize(originalExtraField.getPreferredSize());
-		newExtraField.setMinimumSize(newExtraField.getPreferredSize());
-		
-		originalText.setFont(getFont());
-		newText.setFont(getFont());
 		
 		JPanel buttonPanel = new JPanel();
 		buttonPanel.add(f10Button);
@@ -197,62 +164,6 @@ public class MainWindow extends JFrame {
 		c.ipadx = 10;
 		idPanel.add(idCombo, c);
 		
-		JPanel originalTextPanel = new JPanel();
-		originalTextPanel.setLayout(new GridBagLayout());
-		c = new GridBagConstraints();
-		originalTextPanel.setBorder(BorderFactory.createTitledBorder("Original text"));
-		//originalTextPanel.setBackground(Color.WHITE);
-
-		c.gridy = 0;
-		c.gridx = 0;
-		originalTextPanel.add(originalText, c);
-		
-		c.gridx = 1;
-		c.anchor = GridBagConstraints.NORTH;
-		c.ipadx = 4;
-		c.insets = new Insets(2, 0, 0, 0);
-		originalTextPanel.add(originalLengths, c);
-		
-		JPanel newTextPanel = new JPanel();
-		newTextPanel.setLayout(new GridBagLayout());
-		c = new GridBagConstraints();
-		newTextPanel.setBorder(BorderFactory.createTitledBorder("Modified text"));
-		
-		c.gridy = 0;
-		c.gridx = 0;
-		newTextPanel.add(newText, c);
-		
-		c.gridx = 1;
-		c.anchor = GridBagConstraints.NORTH;
-		c.ipadx = 4;
-		c.insets = new Insets(2, 0, 0, 0);
-		newTextPanel.add(newLengths, c);
-		
-		originalExtraPanel.setBorder(BorderFactory.createTitledBorder(ORIGINALSPEAKER));
-		originalExtraPanel.add(originalExtraField);
-		
-		newExtraPanel.setBorder(BorderFactory.createTitledBorder(NEWSPEAKER));
-		newExtraPanel.add(newExtraField);
-		
-		c = new GridBagConstraints();
-		regularTextPanel.setLayout(new GridBagLayout());
-		c.anchor = GridBagConstraints.NORTHWEST;
-		c.gridx = 0;
-		c.gridy = 0;
-		c.gridheight = 2;
-		regularTextPanel.add(originalTextPanel, c);
-		c.gridy = GridBagConstraints.RELATIVE;
-		regularTextPanel.add(newTextPanel, c);
-		
-		c.gridx = 1;
-		c.gridy = 0;
-		c.gridheight = 1;
-		regularTextPanel.add(originalExtraPanel, c);
-		c.gridy = GridBagConstraints.RELATIVE;
-		regularTextPanel.add(sideLabel, c);
-		c.gridy = GridBagConstraints.RELATIVE;
-		regularTextPanel.add(newExtraPanel, c);
-		
 		JScrollPane fileScroll = new JScrollPane(fileList);
 		fileScroll.setMinimumSize(new Dimension(fileList.getPreferredScrollableViewportSize().width, 
 				fileList.getPreferredScrollableViewportSize().height));
@@ -266,26 +177,22 @@ public class MainWindow extends JFrame {
 		gbcon.anchor = GridBagConstraints.WEST;
 		
 		addGB(idPanel, GridBagConstraints.RELATIVE, 0);
-		addGB(showUnusedCheck, GridBagConstraints.RELATIVE, 0);
 		
 		addGB(blockPanel, 1, 1);
 		addGB(buttonPanel, GridBagConstraints.RELATIVE, 1);
-		
 		addGB(scriptingCheck, GridBagConstraints.RELATIVE, 1);
 		
-		//widht 2
 		gbcon.gridwidth = 3;
 		addGB(regularTextPanel, 1, GridBagConstraints.RELATIVE);
+		add(multipleChoicePanel, gbcon); //use the same constraints
 		
 		gbcon.gridwidth = 1;
 		addGB(saveFileButton, 1, GridBagConstraints.RELATIVE);
 		
 		initListeners();
-		originalText.setPreferredSize(getSize());
-		newText.setPreferredSize(getSize());
 		
 		multipleChoicePanel.setVisible(false);
-		multipleChoicePanel.setPreferredSize(regularTextPanel.getPreferredSize());
+		multipleChoicePanel.setMinimumSize(regularTextPanel.getMinimumSize());	
 		
 		setVisible(true);
 		setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
@@ -423,11 +330,7 @@ public class MainWindow extends JFrame {
 			if(index != -1) {
 				if(currentScript != null) {
 					for(ConvoSubBlockData block : currentConvo.getBlockList()) {
-						//wipes any new stuff that wasn't saved to file
-						block.setNewTextString(block.getTextString());
-						if(block.hasExtraString()) {
-							((ExtraStringConvoData) block).setNewExtraInfoString(((ExtraStringConvoData) block).getExtraInfoString());
-						}
+						block.resetNewStrings();
 					}
 				}
 			
@@ -460,127 +363,34 @@ public class MainWindow extends JFrame {
 			
 			currentBlock = currentConvo.getBlockList().get((int) blockSpinner.getValue());
 			
-			updateTextComponents();
-			currentString = newText.getText();
-			
-			List<String> splits = Arrays.asList(currentBlock.getTextString().split("\n"));
-			for(int i = 0; i < MAXLINES; i++) {
-				if(i < splits.size()) {
-					if(currentFontMap != null) {
-						originalLengths.setLabelText(i, getPixelLength(splits.get(i)));
-					}
-					else {
-						originalLengths.setLabelText(i, splits.get(i).length());
-					}
-				}
-				else {
-					originalLengths.setLabelText(i, -1);
-				}
+			if(currentBlock.getMagic() == ConvoMagic.MULTIPLECHOICE) {
+				currentPanel = multipleChoicePanel;
+				multipleChoicePanel.setVisible(true);
+				regularTextPanel.setVisible(false);
+			}
+			else {
+				currentPanel = regularTextPanel;
+				multipleChoicePanel.setVisible(false);
+				regularTextPanel.setVisible(true);
 			}
 			
-			splitString();
-		});
-		
-		newText.getDocument().addDocumentListener(new DocumentListener() {
-			public void changedUpdate(DocumentEvent e) {
-			}
-
-			public void insertUpdate(DocumentEvent e) {
-				update(e);
-			}
-
-			public void removeUpdate(DocumentEvent e) {
-				update(e);
-			}
-			
-			public void update(DocumentEvent e) {
-				if(!updateComponents) {
-					return;
-				}
-				
-				Document doc = e.getDocument();
-				EventType type = e.getType();
-				int changeLength = e.getLength();
-				
-				int offset = e.getOffset();
-				int lineChanged = 0;
-				
-				if(changeLength > 1) {
-					splitString(); //if a large paste or delete happens, just resplit
-					currentString = newText.getText();
-					return;
-				}
-				
-				for(int i = 0; i < MAXLINES; i++) {
-					//int newLinePos = newLineLocs[i];
-					if(offset > newLineLocs.get(i)) {
-						continue;
-					}
-					
-					lineChanged = i;
-					break;
-				}
-			
-				if(type == EventType.INSERT) {
-					try {
-						String newChar = doc.getText(offset, 1);
-						
-						if(newChar.equals("\n")) {
-							splitString();
-						}
-						else {
-							if(currentFontMap != null) {
-								newLengths.setLabelText(lineChanged, newLengths.getLabelText(lineChanged) + currentFontMap.get(newChar));
-							}
-							else {
-								newLengths.setLabelText(lineChanged, newLengths.getLabelText(lineChanged) + 1);
-							}
-							newLineLocs.set(lineChanged, newLineLocs.get(lineChanged) + 1);
-						}
-					}
-					catch (BadLocationException b) {
-					}
-					currentString = newText.getText();
-				}
-				else if(type == EventType.REMOVE) {
-					String removedChar = currentString.substring(offset, offset + 1);
-					
-					if(removedChar.equals("\n")) { //a newline was deleted
-						splitString();
-					}
-					else {
-						if(currentFontMap != null) {
-							if(currentFontMap.containsKey(removedChar)) {
-								newLengths.setLabelText(lineChanged, newLengths.getLabelText(lineChanged) - currentFontMap.get(removedChar));
-							}
-						}
-						else {
-							newLengths.setLabelText(lineChanged, newLengths.getLabelText(lineChanged) - 1);
-						}
-						newLineLocs.set(lineChanged, newLineLocs.get(lineChanged) - 1);
-					}
-					currentString = newText.getText();
-				}
-			}
+			currentPanel.loadStrings(currentBlock, currentFontMap);
+			setScriptingState();
 		});
 		
 		scriptingCheck.addItemListener(event -> {
-			updateTextComponents();
+			setScriptingState();
 		});
 		
 		idCombo.addActionListener(event -> {
 			if(!updateComponents) {
 				return;
 			}
-			int index = (int) idCombo.getSelectedItem();
+			int index = idCombo.getSelectedIndex();
 			
 			if(currentScript != null && currentConvo != null) {
 				for(ConvoSubBlockData block : currentConvo.getBlockList()) {
-					//wipes any new stuff that wasn't saved to file
-					block.setNewTextString(block.getTextString());
-					if(block.hasExtraString()) {
-						((ExtraStringConvoData) block).setNewExtraInfoString(((ExtraStringConvoData) block).getExtraInfoString());
-					}
+					block.resetNewStrings();
 				}
 			}
 		
@@ -598,41 +408,46 @@ public class MainWindow extends JFrame {
 			blockMaxLabel.setText("of " + (currentConvo.getBlockList().size() - 1));
 		});
 		
-		showUnusedCheck.addItemListener(event -> {
-			populateIDs();
-		});
-		
 		saveFileButton.addActionListener(event -> {
 			writeFile();
 		});
 		
 		f10Button.addActionListener(event -> {
 			currentFontMap = font10Map;
-			splitString();
+			currentPanel.setCurrentFontMap(currentFontMap);
+			if(currentPanel == regularTextPanel) {
+				regularTextPanel.splitString();
+			}
 		});
 		
 		f12Button.addActionListener(event -> {
 			currentFontMap = font12Map;
-			splitString();
+			currentPanel.setCurrentFontMap(currentFontMap);
+			if(currentPanel == regularTextPanel) {
+				regularTextPanel.splitString();
+			}
 		});
 	}
 	
 	private void populateIDs() {
 		updateComponents = false;
 		idComboModel.removeAllElements();
-		if(showUnusedCheck.isSelected()) {
-			idComboModel.addAll(currentScript.getConvoMap().keySet());
-		}
-		else {
-			List<Integer> usedIDs = currentScript.getUsedConvoIDs();
-			for(Entry<Integer, Conversation> entry : currentScript.getConvoMap().entrySet()) {
-				if(usedIDs.contains(entry.getValue().getId())) {
-					idComboModel.addElement(entry.getKey());
-				}
+		List<Integer> usedIDs = currentScript.getUsedConvoIDs();
+		
+		for(Entry<Integer, Conversation> entry : currentScript.getConvoMap().entrySet()) {
+			String key = entry.getKey().toString();
+			if(usedIDs.contains(entry.getValue().getId())) {
+				idComboModel.addElement(key);
+			}
+			else {
+				idComboModel.addElement(key + " (UNUSED)");
 			}
 		}
+
 		updateComponents = true;
-		idCombo.setSelectedIndex(0);
+		if(idComboModel.getSize() > 0) {
+			idCombo.setSelectedIndex(0);
+		}
 	}
 	
 	private void findMatchingFiles(File parentDir, File saveDir, String filter) {
@@ -666,187 +481,23 @@ public class MainWindow extends JFrame {
 		}
 	}
 	
-	private void updateTextComponents() {
-		ConvoMagic magic = currentBlock.getMagic();
-		
+	private void setScriptingState() {
 		if(!scriptingCheck.isSelected()) {
-			originalText.setText(currentBlock.getTextString());
+			currentPanel.loadOriginalString(currentBlock);
 		}
 		else {
-			String string = currentBlock.getTextString();
-			String newString = null;
-			int stringIndex = 0;
-			
-			while(stringIndex != -1) { //furigana first
-				stringIndex = string.indexOf('<');
-				int colonIndex = string.indexOf(':', stringIndex);
-				
-				if(stringIndex != -1) {
-					newString = string.substring(stringIndex + 1, colonIndex) + string.substring(string.indexOf('>') + 1);
-					if(stringIndex != 0) { //if first char isn't <, append the extra chars
-						newString = string.substring(0, stringIndex) + newString;
-					}
-					string = newString;
-				}
-			}
-			stringIndex = 0;
-			while(stringIndex != -1) { //does opening and closing color tags separately
-				stringIndex = string.indexOf('{'); //
-				int closeBraceIndex = string.indexOf('}', stringIndex);
-				if(stringIndex != -1) {
-					newString = string.substring(closeBraceIndex + 1);
-					
-					if(stringIndex != 0) {
-						newString = string.substring(0, stringIndex) + newString;
-					}
-					string = newString;
-				}
-			}
-			originalText.setText(string);
-		}
-		
-		newText.setText(currentBlock.getNewTextString());
-		
-		if(currentBlock.hasExtraString()) {
-			ExtraStringConvoData extra = (ExtraStringConvoData) currentBlock;
-			
-			originalExtraField.setText(extra.getExtraInfoString());
-			newExtraField.setText(extra.getNewExtraInfoString());
-			newExtraField.setEnabled(true);
-			
-			if(extra.getSpeakerSide() != -1) {
-				switch(extra.getSpeakerSide()) {
-					case ExtraStringConvoData.NOSIDE:
-						sideLabel.setText("NO SIDE");
-						break;
-					case ExtraStringConvoData.RIGHTSIDE:
-						sideLabel.setText("RIGHT SIDE");
-						break;
-					case ExtraStringConvoData.LEFTSIDE:
-						sideLabel.setText("LEFT SIDE");
-						break;
-				}
-			}
-			
-			if(isSpeakerBorder && magic == ConvoMagic.TEXTENTRY) {
-				originalExtraPanel.setBorder(BorderFactory.createTitledBorder(ORIGINALANSWER));
-				newExtraPanel.setBorder(BorderFactory.createTitledBorder(NEWANSWER));
-				isSpeakerBorder = false;
-			}
-			else {
-				if(!isSpeakerBorder) {
-					originalExtraPanel.setBorder(BorderFactory.createTitledBorder(ORIGINALSPEAKER));
-					newExtraPanel.setBorder(BorderFactory.createTitledBorder(NEWSPEAKER));
-					isSpeakerBorder = true;
-				}
-			}
-			newExtraField.setEnabled(true);
-		}
-		else {
-			originalExtraField.setText("");
-			newExtraField.setText("");
-			newExtraField.setEnabled(false);
-			sideLabel.setText("");
-		}
-		
-		if(magic == ConvoMagic.TEXTENTRY && !currentBlock.hasMainString()) {
-			newText.setEnabled(false);
-		}
-		else {
-			newText.setEnabled(true);
-		}
-	}
-	
-	private int getPixelLength(String string) {
-		int pixelLen = 0;
-		for(int i = 0; i < string.length(); i++) {
-			String chara = string.substring(i, i+1);
-			if(currentFontMap.containsKey(chara)) {
-				pixelLen += currentFontMap.get(chara);
-			}
-		}
-		return pixelLen;
-	}
-	
-	//TODO: this sometimes acts up
-	private void splitString() {
-		List<String> splits = new ArrayList<String>();
-		String text = newText.getText();
-		int stringIndex = 0;
-		int prevStringIndex = 0;
-		int arrayIndex = 0;
-		boolean isFirstLoop = true;
-		
-		newLineLocs.clear();
-		
-		while(stringIndex != -1) {
-			if(!isFirstLoop) {
-				stringIndex++;
-				prevStringIndex = stringIndex;
-			}
-			stringIndex = text.indexOf('\n', stringIndex);
-			String substring = null;
-			
-			if(stringIndex == -1) { //no more newlines
-				if(prevStringIndex >= text.length()) {
-					substring = "";
-				}
-				else {
-					substring = text.substring(prevStringIndex);
-				}
-				newLineLocs.add(prevStringIndex + substring.length());
-			}
-			else {
-				if(text.substring(prevStringIndex, stringIndex).equals("\n")) {
-					System.out.println("newline");
-					substring = "";
-				}
-				else {
-					substring = text.substring(prevStringIndex, stringIndex);
-				}
-				newLineLocs.add(stringIndex);
-			}
-			
-			if(currentFontMap != null) {
-				newLengths.setLabelText(arrayIndex, getPixelLength(substring));
-			}
-			else {
-				newLengths.setLabelText(arrayIndex, substring.length());
-			}
-			splits.add(substring);
-			arrayIndex++;
-			isFirstLoop = false;
-		}
-		while(arrayIndex < MAXLINES) {
-			newLengths.setLabelText(arrayIndex, -1);
-			newLineLocs.add(-1);
-			arrayIndex++;
+			currentPanel.removeStringFormatting(currentBlock);
 		}
 	}
 	
 	private void clearComponents() {
-		originalText.setText("");
-		newText.setText("");
-		originalExtraField.setText("");
-		newExtraField.setText("");
+		currentPanel.clearComponents();
 		blockSpinner.setValue(0);
 		blockMaxLabel.setText("of 0");
 	}
 	
 	private void saveText() {
-		if(currentBlock.getSharedStringList() != null) {
-			for(ConvoSubBlockData block : currentBlock.getSharedStringList()) {
-				block.setNewTextString(newText.getText());
-			}
-		}
-		else {
-			currentBlock.setNewTextString(newText.getText());
-		}
-		
-		//for now keep speakers separate, but i think most of them are the same
-		if(currentBlock.hasExtraString()) {
-			((ExtraStringConvoData) currentBlock).setNewExtraInfoString(newExtraField.getText());
-		}
+		currentPanel.saveStrings(currentBlock);
 	}
 	
 	private void writeFile() {
@@ -967,6 +618,9 @@ public class MainWindow extends JFrame {
 							fw.write(twoByteBuffer.putShort(0, (short) extraInfoBytes.length).array()); //new length
 							originalFileIndex += 2;
 							break;
+						case MULTIPLECHOICE:
+							
+							break;
 					}
 					
 					//at this point, file should be at the start of the actual text
@@ -992,6 +646,8 @@ public class MainWindow extends JFrame {
 								fw.write(stringBytes);
 								originalFileIndex += (block.getTextStart() - originalFileIndex) + 2 + block.getOldTextLength();
 							}
+							break;
+						case MULTIPLECHOICE:
 							break;
 					}
 				}
@@ -1145,90 +801,6 @@ public class MainWindow extends JFrame {
 		gbcon.gridx = x;
 		gbcon.gridy = y;
 		add(comp, gbcon);
-	}
-	
-	private static class LengthPanel extends JPanel {
-		private JLabel lengthLabel1 = new JLabel();
-		private JLabel lengthLabel2 = new JLabel();
-		private JLabel lengthLabel3 = new JLabel();
-		private JLabel lengthLabel4 = new JLabel();
-		private JLabel lengthLabel5 = new JLabel();
-		private JLabel lengthLabel6 = new JLabel();
-		List<JLabel> labels = new ArrayList<JLabel>(Arrays.asList(lengthLabel1, lengthLabel2, lengthLabel3,
-				lengthLabel4, lengthLabel5, lengthLabel6));
-		
-		public LengthPanel() {
-			//setLayout(new BoxLayout(this,  BoxLayout.Y_AXIS));
-			setLayout(new GridBagLayout());
-			GridBagConstraints c = new GridBagConstraints();
-			setOpaque(false);
-			
-			c.anchor = GridBagConstraints.BASELINE;
-			
-			c.gridx = 0;
-			
-			c.gridy = 0;
-			add(lengthLabel1, c);
-			
-			c.gridy = 1;
-			add(lengthLabel2, c);
-			
-			c.gridy = 2;
-			add(lengthLabel3, c);
-			
-			c.gridy = 3;
-			add(lengthLabel4, c);
-			
-			c.gridy = 4;
-			add(lengthLabel5, c);
-			
-			c.gridy = 5;
-			add(lengthLabel6, c);
-			
-		}
-		
-		public void setLabelText(int label, int content) {
-			if(content == -1) {
-				labels.get(label).setText("");
-			}
-			else if(label > 5) {
-				return;
-			}
-			else {
-				labels.get(label).setText(Integer.toString(content));
-			}
-		}
-		
-		public int getLabelText(int label) {
-			return Integer.valueOf(labels.get(label).getText());
-		}
-	}
-	
-	public class MultipleChoicePanel extends JPanel {
-		private JTextField originalText = new JTextField();
-		private JTextField newText = new JTextField();
-		
-		public MultipleChoicePanel(String text) {
-			originalText.setEditable(false);
-			originalText.setText(text);
-			
-			originalText.setBorder(BorderFactory.createTitledBorder("Original text"));
-			newText.setBorder(BorderFactory.createTitledBorder("Original text"));
-			
-			setLayout(new GridBagLayout());
-			GridBagConstraints c = new GridBagConstraints();
-			
-			c.gridx = 0;
-			c.gridy = 0;
-			add(originalText, c);
-			
-			c.gridy = GridBagConstraints.RELATIVE;
-			add(newText, c);
-		}
-		
-		public String getNewText() {
-			return newText.getText();
-		}
 	}
 	
 	public static class NoDeselectionModel extends DefaultListSelectionModel {

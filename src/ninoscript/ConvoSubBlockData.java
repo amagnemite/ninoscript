@@ -4,6 +4,7 @@ import java.io.UnsupportedEncodingException;
 import java.util.ArrayList;
 import java.util.List;
 
+import ninoscript.ConvoSubBlockData.ExtraStringConvoData;
 import ninoscript.ScriptParser.ConvoMagic;
 
 public class ConvoSubBlockData {
@@ -38,6 +39,17 @@ public class ConvoSubBlockData {
 		}
 		
 		newTextString = textString;
+	}
+	
+	public void resetNewStrings() {
+		//wipes any new stuff that wasn't saved to file
+		if(getClass() == MultipleChoiceConvoData.class) {
+			((MultipleChoiceConvoData) this).resetNewStrings();
+		}
+		setNewTextString(getTextString());
+		if(hasExtraString()) {
+			((ExtraStringConvoData) this).setNewExtraInfoString(((ExtraStringConvoData) this).getExtraInfoString());
+		}
 	}
 	
 	public boolean hasExtraString() {
@@ -185,5 +197,18 @@ public class ConvoSubBlockData {
 			newStrings.addAll(originalStrings);
 		}
 		
+		public void resetNewStrings() {
+			for(int i = 0; i < newStrings.size(); i++) {
+				newStrings.set(i, originalStrings.get(i));
+			}
+		}
+		
+		public List<String> getOriginalStrings() {
+			return originalStrings;
+		}
+		
+		public List<String> getNewStrings() {
+			return newStrings;
+		}
 	}
 }
