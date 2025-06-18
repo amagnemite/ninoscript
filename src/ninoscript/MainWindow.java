@@ -5,6 +5,7 @@ import java.awt.Dimension;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.FileWriter;
@@ -39,22 +40,15 @@ import javax.swing.JPanel;
 import javax.swing.JRadioButton;
 import javax.swing.JScrollPane;
 import javax.swing.JSpinner;
-import javax.swing.JTextArea;
-import javax.swing.JTextField;
 import javax.swing.ListSelectionModel;
 import javax.swing.SpinnerNumberModel;
 import javax.swing.UIManager;
-import javax.swing.event.DocumentEvent;
-import javax.swing.event.DocumentEvent.EventType;
-import javax.swing.event.DocumentListener;
 import javax.swing.filechooser.FileFilter;
-import javax.swing.text.BadLocationException;
-import javax.swing.text.Document;
+
 
 import n2dhandler.N2D;
 import n2dhandler.TileMaker;
 import ninoscript.ConvoSubBlockData.*;
-import ninoscript.ScriptParser.Conversation;
 import ninoscript.ScriptParser.ConvoMagic;
 
 @SuppressWarnings("serial")
@@ -501,13 +495,20 @@ public class MainWindow extends JFrame {
 	}
 	
 	private void writeFile() {
+		//byte length of the string length (byte/short)
+		final int DIALOGUEBYTELENGTH = 2;
+		final int NONDIALOGUEBYTELENGTH = 1;
+		final int TEXTENTRYBYTELENGTH = 2;
+		final int MULTIPLECHOICEBYTELENGTH = 2;
+		final int SPEAKERBYTELENGTH = 1;
+		final byte[] CONVERSATIONMARKER = {0x0A, 0x09, 0x19, 0x00};
+		
 		File originalFile = scriptMap.get(currentScript);
 		File tempFile;
 		File backupFile = new File(originalFile.getAbsolutePath() + ".bak");
 		FileOutputStream fw;
 		int originalFileIndex = 0;
 		byte[] fullFileBytes = currentScript.getFullFileBytes();
-		final byte[] CONVERSATIONMARKER = {0x0A, 0x09, 0x19, 0x00};
 		
 		//write gets upset if >255 and need to pad 00s anyway
 		ByteBuffer fourByteBuffer = ByteBuffer.allocate(4);
@@ -522,156 +523,131 @@ public class MainWindow extends JFrame {
 			tempFile = File.createTempFile(originalFile.getName(), ".tmp", originalFile.getParentFile());
 			tempFile.deleteOnExit();
 			fw = new FileOutputStream(tempFile);
-		}
-		catch (IOException i) {
-			return;
-		}
 		
-		for(Conversation convo : currentScript.getConvoMap().values()) {
-			int newConvoSize = 0;
-			int oldTotalBlocksSize = 0;
-			int newTotalBlocksSize = 0;
-			Map<ConvoSubBlockData, byte[]> blockMap = new HashMap<ConvoSubBlockData, byte[]>();
-			Map<ConvoSubBlockData, byte[]> extraDataMap = new HashMap<ConvoSubBlockData, byte[]>();
-			
-			//first loop to get the new overall convo size
-			for(ConvoSubBlockData block : convo.getBlockList()) {
-				oldTotalBlocksSize += block.getOldFullBlockLength();
-				int extraInfoSizeDiff = 0;
-				byte[] newStringBytes = null;
-				byte[] newExtraInfoBytes = null;
-				try {
-					newStringBytes = block.getNewTextString().getBytes("Shift-JIS");
-					if(block.hasExtraString()) {
-						newExtraInfoBytes = ((ExtraStringConvoData) block).getNewExtraInfoString().getBytes("Shift-JIS");
-						extraInfoSizeDiff = newExtraInfoBytes.length - ((ExtraStringConvoData) block).getOldExtraInfoLength();
-						extraDataMap.put(block, newExtraInfoBytes);
-					}
-				}
-				catch (UnsupportedEncodingException e) {
-				}
+			for(Conversation convo : currentScript.getConvoMap().values()) {
+				ByteArrayOutputStream convoStream = new ByteArrayOutputStream();
+				int convoHeaderExtraBytes = convo.getStartOffset() != 0 ? 8 : 4;
+				int convoLength = convo.getLength();
 				
-				newTotalBlocksSize += block.getOldFullBlockLength() + (newStringBytes.length - block.getOldTextLength()) + extraInfoSizeDiff;
-				blockMap.put(block, newStringBytes);
-			}
-			newConvoSize = (convo.getLength() - oldTotalBlocksSize) + newTotalBlocksSize;
-			
-			//write everything up to the index of length of the convo start
-			try {	
+				//write any non text containing convos, skip convo length and magic
+				fw.write(fullFileBytes, originalFileIndex, convo.getStartOffset() - originalFileIndex);
+				originalFileIndex += (convo.getStartOffset() + convoHeaderExtraBytes) - originalFileIndex;
+				
+				for(ConvoSubBlockData block : convo.getBlockList()) {
+					byte[] mainStringArray;
+					byte[] extraInfoArray = null;
+					ByteArrayOutputStream blockStream = new ByteArrayOutputStream();
+					ConvoMagic magic = block.getMagic();
+					int length = DIALOGUEBYTELENGTH;
+					int blockOffset = 0;
+					int firstTextStart = magic == ConvoMagic.TEXTENTRY ? ((ExtraStringConvoData) block).getExtraInfoStartOffset()
+							: block.getTextStartOffset();
+					int blockLength = block.getOldFullBlockLength();
+					
+					//write any non text blocks that occur before this one
+					convoStream.write(fullFileBytes, originalFileIndex, block.getStartOffset() - originalFileIndex);
+					originalFileIndex += block.getStartOffset() - originalFileIndex;
+						
+					try {
+						//combine new strings with block
+						int blockPostLengthOffset = block.getStartOffset() + 3; //3 = id + two byte overall length
+						blockStream.write(fullFileBytes, blockPostLengthOffset, firstTextStart - blockPostLengthOffset); 
+						blockOffset = firstTextStart;
+						
+						switch(magic) {
+							case NONDIALOGUE:
+								length = NONDIALOGUEBYTELENGTH;
+							case DIALOGUE:				
+								mainStringArray = block.getNewTextString().getBytes("Shift-JIS");
+								if(length == NONDIALOGUEBYTELENGTH) {
+									blockStream.write(Integer.valueOf(mainStringArray.length).byteValue());
+								}
+								else {
+									blockStream.writeBytes(twoByteBuffer.putShort(0, (short) mainStringArray.length).array());
+								}
+								blockStream.writeBytes(mainStringArray);
+								blockOffset += block.getOldTextLength() + length;
+								
+								if(block.hasExtraString()) {
+									extraInfoArray = ((ExtraStringConvoData) block).getNewExtraInfoString().getBytes("Shift-JIS");
+									blockStream.write(fullFileBytes, blockOffset, ((ExtraStringConvoData) block).getExtraInfoStartOffset() - blockOffset); //everything in between main and speaker
+									blockStream.write(Integer.valueOf(extraInfoArray.length).byteValue());
+									blockStream.writeBytes(extraInfoArray);
+									blockOffset = ((ExtraStringConvoData) block).getExtraInfoStartOffset() + ((ExtraStringConvoData) block).getOldExtraInfoLength() + SPEAKERBYTELENGTH;
+								}
+								break;
+							case TEXTENTRY:	
+								extraInfoArray = ((ExtraStringConvoData) block).getNewExtraInfoString().getBytes("Shift-JIS");
+								blockStream.writeBytes(twoByteBuffer.putShort(0, (short) extraInfoArray.length).array());
+								blockStream.writeBytes(extraInfoArray);
+								blockOffset += ((ExtraStringConvoData) block).getOldExtraInfoLength() + TEXTENTRYBYTELENGTH;
+								
+								if(block.hasMainString()) { //text entry strings are end to end
+									mainStringArray = block.getNewTextString().getBytes("Shift-JIS");
+									blockStream.writeBytes(twoByteBuffer.putShort(0, (short) mainStringArray.length).array());
+									blockStream.writeBytes(mainStringArray);
+									blockOffset = block.getTextStartOffset() + block.getOldTextLength() + TEXTENTRYBYTELENGTH;
+								}
+								break;
+							case MULTIPLECHOICE:
+								int stringCount = 0;
+								for(String string : ((MultipleChoiceConvoData) block).getNewStrings()) {
+									mainStringArray = string.getBytes("Shift-JIS");
+									blockStream.writeBytes(twoByteBuffer.putShort(0, (short) mainStringArray.length).array());
+									blockStream.writeBytes(mainStringArray);
+									stringCount++;
+								}
+								blockOffset = block.getTextStartOffset() + MULTIPLECHOICEBYTELENGTH +
+										stringCount * MULTIPLECHOICEBYTELENGTH + ((MultipleChoiceConvoData) block).getOriginalTotalStringsLength();
+								break;
+						}
+						
+					}
+					catch (UnsupportedEncodingException e) {
+					}
+					
+					int bytesRead = blockOffset - (block.getStartOffset() + 3);
+					if(bytesRead < blockLength) {
+						blockStream.write(fullFileBytes, blockOffset, blockLength - bytesRead);
+					}
+					
+					//should have all the bytes except for magic and the total blockLength
+					convoStream.write(block.getMagic().getValue());
+					convoStream.writeBytes(twoByteBuffer.putShort(0, (short) blockStream.size()).array());
+					blockStream.writeTo(convoStream);
+					originalFileIndex += (blockLength + 3);
+				}
+				//the length of convo blocks does include the magic, unlike dialogue blocks
+				int bytesRead = originalFileIndex - (convo.getStartOffset() + convoHeaderExtraBytes);
+				if(bytesRead < convoLength) {
+					convoStream.write(fullFileBytes, originalFileIndex, convoLength - bytesRead);
+					originalFileIndex += convoLength - bytesRead;// + convoHeaderExtraBytes;
+				}	
+				
+				//now should have everything but the convo magic and length in stream
 				if(convo.getStartOffset() != 0) {
-					fw.write(fullFileBytes, originalFileIndex, convo.getStartOffset() - originalFileIndex);
-					
-					fw.write(fourByteBuffer.putInt(0, newConvoSize).array());
+					fw.write(fourByteBuffer.putInt(0, convoStream.size()).array());
 					fw.write(CONVERSATIONMARKER);
-					
-					originalFileIndex += (convo.getStartOffset() - originalFileIndex) + 8;
 				}
 				else { //for one convo files
 					fw.write(CONVERSATIONMARKER);
-					originalFileIndex += 4;
 				}
+				convoStream.writeTo(fw);
 			}
-			catch (IOException e) {
-			}
-			
-			//now writing actual convo blocks
-			for(ConvoSubBlockData block : convo.getBlockList()) {
-				byte[] stringBytes = blockMap.get(block);
-				byte[] extraInfoBytes = null;
-				int newBlockLength = 0;
-				int extraInfoSizeDiff = 0;
-				
-				if(block.hasExtraString()) {
-					extraInfoBytes = extraDataMap.get(block);
-					extraInfoSizeDiff = extraInfoBytes.length - ((ExtraStringConvoData) block).getOldExtraInfoLength();
-				}
-				newBlockLength = block.getOldFullBlockLength() + (stringBytes.length - block.getOldTextLength()) + extraInfoSizeDiff;
-				
-				try {
-					//write everything up to this block
-					fw.write(fullFileBytes, originalFileIndex, block.getBlockStart() - originalFileIndex);
-					
-					originalFileIndex += (block.getBlockStart() - originalFileIndex);
-					
-					ConvoMagic magic = block.getMagic();
-					fw.write(block.getMagic().getValue());
-					fw.write(twoByteBuffer.putShort(0, (short) newBlockLength).array()); //new overall block length
-					
-					originalFileIndex += 3;
-					
-					//write everything between the full length and the text length
-					fw.write(fullFileBytes, originalFileIndex, block.getTextStart() - originalFileIndex);
-					
-					originalFileIndex += block.getTextStart() - originalFileIndex;
-					
-					//text length
-					switch(magic) {
-						case DIALOGUE:
-							fw.write(twoByteBuffer.putShort(0, (short) stringBytes.length).array()); //new length
-							originalFileIndex += 2;
-							break;			
-						case NONDIALOGUE: //nondialogue can only be 1 byte length long
-							fw.write(Integer.valueOf(stringBytes.length).byteValue());
-							originalFileIndex++;
-							break;
-						case TEXTENTRY:
-							fw.write(twoByteBuffer.putShort(0, (short) extraInfoBytes.length).array()); //new length
-							originalFileIndex += 2;
-							break;
-						case MULTIPLECHOICE:
-							
-							break;
-					}
-					
-					//at this point, file should be at the start of the actual text
-					switch(magic) {
-						case DIALOGUE:
-						case NONDIALOGUE:
-							fw.write(stringBytes);
-							originalFileIndex += block.getOldTextLength();
-							if(block.hasExtraString()) {
-								fw.write(fullFileBytes, originalFileIndex, ((ExtraStringConvoData) block).getExtraInfoStart() - originalFileIndex);	
-								
-								fw.write(extraInfoBytes.length);
-								fw.write(extraInfoBytes);
-								
-								originalFileIndex += (((ExtraStringConvoData) block).getExtraInfoStart() - originalFileIndex) + 1 + ((ExtraStringConvoData) block).getOldExtraInfoLength();
-							}
-							break;
-						case TEXTENTRY:
-							fw.write(extraInfoBytes);
-							originalFileIndex += ((ExtraStringConvoData) block).getOldExtraInfoLength();
-							if(block.hasMainString()) { //text entry strings are placed end to end
-								fw.write(twoByteBuffer.putShort(0, (short) stringBytes.length).array());
-								fw.write(stringBytes);
-								originalFileIndex += (block.getTextStart() - originalFileIndex) + 2 + block.getOldTextLength();
-							}
-							break;
-						case MULTIPLECHOICE:
-							break;
-					}
-				}
-				catch (IOException e) {
-					//
-				}
-			}
-		}
 		
-		try {
+			//write anything else that's left
 			if(originalFileIndex < fullFileBytes.length) {
 				fw.write(fullFileBytes, originalFileIndex, fullFileBytes.length - originalFileIndex);
 			}
 			fw.close();
+			if(backupFile.exists()) {
+				backupFile.delete();
+			}
+			originalFile.renameTo(backupFile);
+			tempFile.renameTo(originalFile);
 		}
 		catch (IOException e) {
-			//
 		}
-		
-		if(backupFile.exists()) {
-			backupFile.delete();
-		}
-		originalFile.renameTo(backupFile);
-		tempFile.renameTo(originalFile);
 		
 		reloadFile(scriptMap.get(currentScript));
 	}

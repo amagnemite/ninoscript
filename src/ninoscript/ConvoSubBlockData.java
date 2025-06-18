@@ -10,9 +10,9 @@ import ninoscript.ScriptParser.ConvoMagic;
 public class ConvoSubBlockData {
 	//specific chunks of dialogue, other text, etc in a given convo
 	protected ConvoMagic magic;
-	protected int blockStartOffset;
-	protected int oldFullBlockLength;
-	protected int textStartOffset;
+	protected int blockStartOffset; //actual start of block, including id and length
+	protected int oldFullBlockLength; //does not include magic + length
+	protected int textStartOffset; //offset of the text's length
 	protected int oldTextLength;
 	protected boolean hasExtraString = false;
 	protected boolean hasMainString = true;
@@ -25,9 +25,9 @@ public class ConvoSubBlockData {
 	
 	public ConvoSubBlockData(ConvoMagic magic, int blockStart, int fullBlockLength, int textStart, byte[] textBytes) {
 		this.magic = magic;
-		this.blockStartOffset = blockStart; //actual start of block, including id and length
+		this.blockStartOffset = blockStart;
 		this.oldFullBlockLength = fullBlockLength;
-		this.textStartOffset = textStart; //offset of the text's length
+		this.textStartOffset = textStart;
 		
 		try {
 			if(textBytes != null) {
@@ -76,7 +76,7 @@ public class ConvoSubBlockData {
 		return oldTextLength;
 	}
 
-	public int getTextStart() {
+	public int getTextStartOffset() {
 		return textStartOffset;
 	}
 	
@@ -92,7 +92,7 @@ public class ConvoSubBlockData {
 		return magic;
 	}
 	
-	public int getBlockStart() {
+	public int getStartOffset() {
 		return blockStartOffset;
 	}
 	
@@ -156,7 +156,7 @@ public class ConvoSubBlockData {
 			this.newExtraInfoString = newExtraInfoString;
 		}
 		
-		public int getExtraInfoStart() {
+		public int getExtraInfoStartOffset() {
 			return extraStringOffset;
 		}
 
@@ -178,14 +178,12 @@ public class ConvoSubBlockData {
 	}
 	
 	public static class MultipleChoiceConvoData extends ConvoSubBlockData {
-		int choicesStart;
 		List<String> originalStrings = new ArrayList<String>();
 		List<String> newStrings = new ArrayList<String>();
 		List<Integer> originalStringLengths = new ArrayList<Integer>();
 		
 		public MultipleChoiceConvoData(ConvoMagic magic, int blockStart, int fullBlockLength, int choicesStart, List<byte[]> stringBytes) {
-			super(magic, blockStart, fullBlockLength, -1, null);
-			this.choicesStart = choicesStart;
+			super(magic, blockStart, fullBlockLength, choicesStart, null);
 			try {
 				for(byte[] bytes : stringBytes) {
 					originalStrings.add(new String(bytes, "Shift_JIS"));
@@ -209,6 +207,14 @@ public class ConvoSubBlockData {
 		
 		public List<String> getNewStrings() {
 			return newStrings;
+		}
+		
+		public int getOriginalTotalStringsLength() {
+			int total = 0;
+			for(int length : originalStringLengths) {
+				total += length;
+			}
+			return total;
 		}
 	}
 }
