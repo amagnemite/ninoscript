@@ -105,6 +105,7 @@ public class RegularTextPanel extends DataPanel {
 		c.gridheight = 2;
 		add(originalTextPanel, c);
 		c.gridy = GridBagConstraints.RELATIVE;
+		c.gridheight = GridBagConstraints.REMAINDER;
 		add(newTextPanel, c);
 		
 		c.gridx = 1;

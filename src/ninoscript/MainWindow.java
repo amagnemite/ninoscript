@@ -551,7 +551,7 @@ public class MainWindow extends JFrame {
 					try {
 						//combine new strings with block
 						int blockPostLengthOffset = block.getStartOffset() + 3; //3 = id + two byte overall length
-						blockStream.write(fullFileBytes, blockPostLengthOffset, firstTextStart - blockPostLengthOffset); 
+						blockStream.write(fullFileBytes, blockPostLengthOffset, firstTextStart - blockPostLengthOffset); //get bytes between start and string
 						blockOffset = firstTextStart;
 						
 						switch(magic) {
@@ -597,8 +597,8 @@ public class MainWindow extends JFrame {
 									blockStream.writeBytes(mainStringArray);
 									stringCount++;
 								}
-								blockOffset = block.getTextStartOffset() + MULTIPLECHOICEBYTELENGTH +
-										stringCount * MULTIPLECHOICEBYTELENGTH + ((MultipleChoiceConvoData) block).getOriginalTotalStringsLength();
+								blockOffset = block.getTextStartOffset() + stringCount * MULTIPLECHOICEBYTELENGTH
+										+ ((MultipleChoiceConvoData) block).getOriginalTotalStringsLength();
 								break;
 						}
 						

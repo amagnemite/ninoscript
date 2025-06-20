@@ -893,7 +893,7 @@ public class ScriptParser {
 		int fullBlockLength = buffer.getShort();
 		buffer.position(buffer.position() + 1);
 		int count = buffer.get() & 0xFF;
-		int choicesStart = buffer.position();
+		int choicesStart = buffer.position() + fullOffset;
 		
 		if(count > 3) {
 			System.out.println(count + " multiple choice");
