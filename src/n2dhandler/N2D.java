@@ -142,9 +142,15 @@ public class N2D {
 		for(int i = 0; i < TOTALCOLORS; i++) {
 			int twoByte = (bytes[i * 2] & 0xFF) | (bytes[i * 2 + 1] & 0xFF) << 8;
 			
+			/*
 			int r = (twoByte & 0x1F) * 255 / 31;
 			int g = ((twoByte >> 5) & 0x1F) * 255 / 31;
 			int b = ((twoByte >> 10) & 0x1F) * 255 / 31;
+			*/
+			//match how tinke calculates colors for compat
+			int r = (twoByte & 0x1F) * 0x8;
+			int g = ((twoByte >> 5) & 0x1F) * 0x8;
+			int b = ((twoByte >> 10) & 0x1F) * 0x8;
 			
 			//to rgb8888
 			colors[i] = b | g << 8 | r << 16 | 255 << 24; //no transparency

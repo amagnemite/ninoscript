@@ -27,7 +27,7 @@ public class NFTRMap {
 		}
 		index += HEADERLENGTH;
 		
-		inputStream.skip(20);
+		inputStream.skip(20); //skip rest of NFTR header + FINF magic + FNIF size
 		
 		//these two just have an extra 8 for whatever reason
 		int charWidthOffset = inputStream.readU32() - 8;

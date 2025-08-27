@@ -5,8 +5,10 @@ import java.awt.Dimension;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.FileWriter;
 import java.io.IOException;
@@ -64,6 +66,7 @@ public class MainWindow extends JFrame {
 	JMenuItem findAllMatches = new JMenuItem("Find all matches");
 	JMenuItem generateN2DImage = new JMenuItem("Generate images from .n2d");
 	JMenuItem tileMaker = new JMenuItem("Make tiles from images");
+	JMenuItem pngToBtx = new JMenuItem("Convert PNG to BTX");
 	
 	DefaultListModel<ScriptParser> fileListModel = new DefaultListModel<ScriptParser>();
 	SpinnerNumberModel blockSpinnerModel = new SpinnerNumberModel(0, 0, null, 1);
@@ -78,7 +81,7 @@ public class MainWindow extends JFrame {
 	JCheckBox scriptingCheck = new JCheckBox("Hide extra text data");
 	
 	DefaultComboBoxModel<String> idComboModel = new DefaultComboBoxModel<String>();
-	JComboBox<String> idCombo = new JComboBox<String>(idComboModel);
+	JComboBox<String> convoCombo = new JComboBox<String>(idComboModel);
 	
 	ButtonGroup fontGroup = new ButtonGroup();
 	JRadioButton f10Button = new JRadioButton("font10");
@@ -114,6 +117,7 @@ public class MainWindow extends JFrame {
 		utilitiesMenu.add(findAllMatches);
 		utilitiesMenu.add(generateN2DImage);
 		utilitiesMenu.add(tileMaker);
+		utilitiesMenu.add(pngToBtx);
 		menuBar.add(utilitiesMenu);
 		setJMenuBar(menuBar);
 		
@@ -156,7 +160,7 @@ public class MainWindow extends JFrame {
 		c.insets = new Insets(0, 0, 0, 5);
 		c.gridx = GridBagConstraints.RELATIVE;
 		c.ipadx = 10;
-		idPanel.add(idCombo, c);
+		idPanel.add(convoCombo, c);
 		
 		JScrollPane fileScroll = new JScrollPane(fileList);
 		fileScroll.setMinimumSize(new Dimension(fileList.getPreferredScrollableViewportSize().width, 
@@ -305,7 +309,6 @@ public class MainWindow extends JFrame {
 			c.showOpenDialog(this);
 			File[] targetFiles = c.getSelectedFiles();
 			
-			
 			c.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
 			c.setFileFilter(null);
 			c.setMultiSelectionEnabled(false);
@@ -318,13 +321,69 @@ public class MainWindow extends JFrame {
 			TileMaker.makeTiles(targetFiles, saveDir);
 		});
 		
+		pngToBtx.addActionListener(event -> {
+			JFileChooser c = new JFileChooser();
+			c.setFileFilter(new PNGFileFilter());
+			c.setDialogTitle("Select a PNG file");
+			c.showOpenDialog(this);
+			File png = c.getSelectedFile();
+			
+			c.setFileFilter(null);
+			c.setDialogTitle("Select the file to write to");
+			c.showSaveDialog(this);
+			File btxToWrite = c.getSelectedFile();
+			
+			String ext = btxToWrite.getName().substring(btxToWrite.getName().lastIndexOf("."));
+			
+			//TODO: differentiate between bmd0/n3d/tmap
+			switch(ext) {
+				case ".bmd0":
+					byte[] byteBuffer = new byte[(int) btxToWrite.length()];
+					FileInputStream inStream;
+					IntByteArrayInputStream buffer = new IntByteArrayInputStream(byteBuffer);
+					
+					try {
+						inStream = new FileInputStream(btxToWrite);
+						inStream.read(byteBuffer);
+						inStream.close();
+						
+						buffer.mark(-1);
+						
+						buffer.skip(8);
+						int totalSize = buffer.readU32();
+						buffer.skip(8);
+						
+						//int mdlOffset = buffer.readU32();
+						int texOffset = buffer.readU32();;
+						
+						buffer.reset();
+						byte[] preTextureBytes = new byte[texOffset]; //header + model bytes
+						buffer.read(preTextureBytes);
+						
+						buffer.reset();
+						byte[] textureBytes = new byte[totalSize - texOffset];
+						buffer.skip(texOffset);
+						buffer.read(textureBytes);
+						
+						BTX btx = new BTX(textureBytes);
+						btx.convertNewImage(png);
+						btx.write(btxToWrite, preTextureBytes);
+					}
+					catch(IOException e) {
+						return;
+					}
+			}
+		});
+		
 		fileList.addListSelectionListener(event -> {
 			int index = fileList.getSelectedIndex();
 			
 			if(index != -1) {
 				if(currentScript != null) {
-					for(ConvoSubBlockData block : currentConvo.getBlockList()) {
-						block.resetNewStrings();
+					for(Conversation convo : currentScript.getConvoMap().values()) {
+						for(ConvoSubBlockData block : convo.getBlockList()) {
+							block.resetNewStrings();
+						}
 					}
 				}
 			
@@ -376,17 +435,19 @@ public class MainWindow extends JFrame {
 			setScriptingState();
 		});
 		
-		idCombo.addActionListener(event -> {
+		convoCombo.addActionListener(event -> {
 			if(!updateComponents) {
 				return;
 			}
-			int index = idCombo.getSelectedIndex();
+			int index = convoCombo.getSelectedIndex();
 			
+			/*
 			if(currentScript != null && currentConvo != null) {
 				for(ConvoSubBlockData block : currentConvo.getBlockList()) {
 					block.resetNewStrings();
 				}
 			}
+			*/
 		
 			currentConvo = currentScript.getConvoMap().get(index);
 			System.out.println(currentConvo.getId() + " " + Integer.toHexString(currentConvo.getId()));
@@ -440,7 +501,7 @@ public class MainWindow extends JFrame {
 
 		updateComponents = true;
 		if(idComboModel.getSize() > 0) {
-			idCombo.setSelectedIndex(0);
+			convoCombo.setSelectedIndex(0);
 		}
 	}
 	

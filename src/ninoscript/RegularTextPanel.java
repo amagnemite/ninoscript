@@ -119,6 +119,8 @@ public class RegularTextPanel extends DataPanel {
 		
 		originalText.setPreferredSize(getSize());
 		newText.setPreferredSize(getSize());
+		
+		initListeners();
 	}
 	
 	public void initListeners() {

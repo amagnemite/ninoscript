@@ -10,8 +10,10 @@ import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
@@ -50,8 +52,8 @@ public class ScriptParser {
 	private String fileName;
 	private byte[] fullFileBytes;
 	private String scriptName = "";
-	private List<Integer> usedConvoIDs = new ArrayList<Integer>();
-	private Map<Integer, Conversation> convoMap = new TreeMap<Integer, Conversation>();
+	private Map<Integer, Conversation> convoMap = new TreeMap<Integer, Conversation>(); //all ids, convos
+	private List<Integer> usedConvoIDs = new ArrayList<Integer>(); //ids that are actually used
 	
 	//only keep track of the first block that contains a reused string, since we can just cross reference in the stringlistmap
 	private Map<String, ConvoSubBlockData> stringFirstBlockOccurranceMap = new HashMap<String, ConvoSubBlockData>();
@@ -67,7 +69,7 @@ public class ScriptParser {
 		ByteBuffer sectionOne = null;
 		ByteBuffer sectionFive = null;
 		ByteBuffer sectionSeven = null;
-		List<Integer> potentialIDs = new ArrayList<Integer>(); //ids that are conditional and may or may not have text
+		Map<Integer, List<Integer>> connectedIDs = new HashMap<Integer, List<Integer>>();
 		
 		final int UNKNOWNTWOBYTETYPE = 0x1F;
 		final int CONDITIONALCONVOTYPE = 0x21;
@@ -85,8 +87,7 @@ public class ScriptParser {
 		final int SECTIONONEFLAG5 = 1 << 3;
 		final int SECTIONFIVEFLAG1 = 1 << 1;
 		final int SECTIONFIVEFLAG2 = 0x8000;
-		
-		
+			
 		try {
 			FileInputStream input = new FileInputStream(file);
 			fullFileBytes = new byte[input.available()];
@@ -114,13 +115,10 @@ public class ScriptParser {
 		fileName = file.getName();
 		
 		int offset = !isSingleConvo ? 4 : 0;
-		if(!isSingleConvo) {
+		if(!isSingleConvo) { //parse section zero
 			scriptNameLength = fullFileBytes[INTERNALSCRIPTNAMEOFFSET] & 0xFF;
-			nameBytes = new byte[scriptNameLength];
+			nameBytes = Arrays.copyOfRange(fullFileBytes, INTERNALSCRIPTNAMEOFFSET + 1, INTERNALSCRIPTNAMEOFFSET + scriptNameLength + 1);
 			
-			for(int i = 1; i <= scriptNameLength; i++) {
-				nameBytes[i - 1] = fullFileBytes[INTERNALSCRIPTNAMEOFFSET + i];
-			}
 			try {
 				scriptName = new String(nameBytes, "Shift-JIS");
 			}
@@ -317,10 +315,13 @@ public class ScriptParser {
 						continue;
 					}
 					else if(subBlockType == CONDITIONALCONVOTYPE) {
+						if(!connectedIDs.containsKey(convoID)) {
+							connectedIDs.put(convoID, new ArrayList<Integer>());
+						}
 						sectionSeven.position(sectionSeven.position() + 2); //length + fixed 1?
 						int chainedID = sectionSeven.getInt();
 						//System.out.println("0x21 " + chainedID);
-						potentialIDs.add(chainedID);
+						connectedIDs.get(convoID).add(chainedID);
 					}
 					else {
 						int len = sectionSeven.get() & 0xFF;
@@ -364,8 +365,24 @@ public class ScriptParser {
 			convoID = !isSingleConvo ? sectionSeven.getInt() : -1;
 		}
 		for(Conversation convo : convoMap.values()) {
-			if(potentialIDs.contains(convo.getId())) {
-				usedConvoIDs.add(convo.getId());
+			if(usedConvoIDs.contains(convo.getId()) && connectedIDs.containsKey(convo.getId())) {
+				//only add connecting ids if their originating id is used
+				usedConvoIDs.addAll(connectedIDs.get(convo.getId()));
+				connectedIDs.remove(convo.getId());
+			}
+		}
+		//it's possible for convos without text to chain into convos with text, so double check here
+		boolean doneChecking = false;
+		while(!doneChecking) {
+			doneChecking = true;
+			Iterator<Entry<Integer, List<Integer>>> iterator = connectedIDs.entrySet().iterator();
+			while(iterator.hasNext()) {
+				Entry<Integer, List<Integer>> entry = iterator.next();
+				if(usedConvoIDs.contains(entry.getKey())) {
+					doneChecking = false;
+					usedConvoIDs.addAll(entry.getValue());
+					iterator.remove();
+				}
 			}
 		}
 	}
