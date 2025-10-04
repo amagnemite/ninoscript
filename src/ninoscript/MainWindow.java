@@ -5,10 +5,10 @@ import java.awt.Dimension;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
-import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.FileWriter;
 import java.io.IOException;
@@ -17,11 +17,14 @@ import java.io.UnsupportedEncodingException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Set;
 
 import javax.swing.ButtonGroup;
 import javax.swing.DefaultComboBoxModel;
@@ -55,6 +58,14 @@ import ninoscript.ScriptParser.ConvoMagic;
 
 @SuppressWarnings("serial")
 public class MainWindow extends JFrame {
+	public enum Mode {
+		SCRIPTFILE,
+		ITEMLINKINFO
+	}
+	
+	private static final Set<String> ITEMLINKINFOFILES = new HashSet<String>(Arrays.asList("equipitemlinkinfo.dat",
+			"itemlinkinfo.dat"));
+	
 	JMenuBar menuBar = new JMenuBar();
 	JMenu optionsMenu = new JMenu("Options");
 	JMenuItem loadFiles = new JMenuItem("Load");
@@ -68,11 +79,11 @@ public class MainWindow extends JFrame {
 	JMenuItem tileMaker = new JMenuItem("Make tiles from images");
 	JMenuItem pngToBtx = new JMenuItem("Convert PNG to BTX");
 	
-	DefaultListModel<ScriptParser> fileListModel = new DefaultListModel<ScriptParser>();
+	DefaultListModel<String> fileListModel = new DefaultListModel<String>();
 	SpinnerNumberModel blockSpinnerModel = new SpinnerNumberModel(0, 0, null, 1);
 	JLabel blockMaxLabel = new JLabel("of 0");
 	
-	JList<ScriptParser> fileList = new JList<ScriptParser>(fileListModel);
+	JList<String> fileList = new JList<String>(fileListModel);
 	JSpinner blockSpinner = new JSpinner(blockSpinnerModel);
 	
 	JList<Integer> originalTextLenLists = new JList<Integer>();
@@ -81,7 +92,7 @@ public class MainWindow extends JFrame {
 	JCheckBox scriptingCheck = new JCheckBox("Hide extra text data");
 	
 	DefaultComboBoxModel<String> idComboModel = new DefaultComboBoxModel<String>();
-	JComboBox<String> convoCombo = new JComboBox<String>(idComboModel);
+	JComboBox<String> convoIdCombo = new JComboBox<String>(idComboModel);
 	
 	ButtonGroup fontGroup = new ButtonGroup();
 	JRadioButton f10Button = new JRadioButton("font10");
@@ -91,16 +102,16 @@ public class MainWindow extends JFrame {
 	MultipleChoicePanel multipleChoicePanel = new MultipleChoicePanel();
 	DataPanel currentPanel = regularTextPanel;
 	
+	private ScriptParserDataAdapter spAdapter = new ScriptParserDataAdapter();
+	private ItemLinkInfoDataAdapter ilAdapter = new ItemLinkInfoDataAdapter();
+	private DataAdapter currentAdapter = spAdapter;
+	private Mode mode = Mode.SCRIPTFILE;
+	
 	private boolean updateComponents = true;
 	
 	private Map<String, Integer> currentFontMap = null;
 	private Map<String, Integer> font10Map = null;
 	private Map<String, Integer> font12Map = null;
-	
-	private Map<ScriptParser, File> scriptMap = new HashMap<ScriptParser, File>();
-	private ScriptParser currentScript = null;
-	private Conversation currentConvo;
-	private ConvoSubBlockData currentBlock;
 	
 	private GridBagConstraints gbcon = new GridBagConstraints();
 	
@@ -135,6 +146,7 @@ public class MainWindow extends JFrame {
 		f10Button.setEnabled(false);
 		f12Button.setEnabled(false);
 		
+		//set up subpanels
 		JPanel blockPanel = new JPanel();
 		blockPanel.setLayout(new GridBagLayout());
 		GridBagConstraints c = new GridBagConstraints();
@@ -150,41 +162,44 @@ public class MainWindow extends JFrame {
 		c.ipadx = 5;
 		blockPanel.add(blockMaxLabel, c);
 		
-		JPanel idPanel = new JPanel();
-		idPanel.setLayout(new GridBagLayout());
+		JPanel convoIndexPanel = new JPanel();
+		convoIndexPanel.setLayout(new GridBagLayout());
 		c = new GridBagConstraints();
 		c.insets = new Insets(0, 5, 0, 5);
 		c.gridy = 0;
 		c.gridx = 0;
-		idPanel.add(new JLabel("Convo number:"), c);
+		convoIndexPanel.add(new JLabel("Convo number:"), c);
 		c.insets = new Insets(0, 0, 0, 5);
 		c.gridx = GridBagConstraints.RELATIVE;
 		c.ipadx = 10;
-		idPanel.add(convoCombo, c);
+		convoIndexPanel.add(convoIdCombo, c);
 		
 		JScrollPane fileScroll = new JScrollPane(fileList);
 		fileScroll.setMinimumSize(new Dimension(fileList.getPreferredScrollableViewportSize().width, 
 				fileList.getPreferredScrollableViewportSize().height));
 		
+		//actually adding to mainwindow
+		gbcon.anchor = GridBagConstraints.NORTHWEST;
 		gbcon.gridheight = 5;
 		gbcon.fill = GridBagConstraints.BOTH;
 		addGB(fileScroll, 0, 0);
 		
-		gbcon.fill = GridBagConstraints.NONE;
-		gbcon.gridheight = 1;
 		gbcon.anchor = GridBagConstraints.WEST;
-		
-		addGB(idPanel, GridBagConstraints.RELATIVE, 0);
+		gbcon.gridheight = 1;
+		gbcon.fill = GridBagConstraints.NONE;
+		addGB(convoIndexPanel, GridBagConstraints.RELATIVE, 0);
 		
 		addGB(blockPanel, 1, 1);
 		addGB(buttonPanel, GridBagConstraints.RELATIVE, 1);
 		addGB(scriptingCheck, GridBagConstraints.RELATIVE, 1);
 		
 		gbcon.gridwidth = 3;
+		gbcon.weighty = 0.7;
 		addGB(regularTextPanel, 1, GridBagConstraints.RELATIVE);
 		add(multipleChoicePanel, gbcon); //use the same constraints
 		
 		gbcon.gridwidth = 1;
+		gbcon.weighty = 0;
 		addGB(saveFileButton, 1, GridBagConstraints.RELATIVE);
 		
 		initListeners();
@@ -210,12 +225,14 @@ public class MainWindow extends JFrame {
 		loadFiles.addActionListener(event -> {
 			JFileChooser c = new JFileChooser();
 			c.setFileSelectionMode(JFileChooser.FILES_AND_DIRECTORIES);
-			c.setFileFilter(new BinFileFilter());
+			//c.setFileFilter(new BinFileFilter());
 			c.showOpenDialog(this);
 			File file = c.getSelectedFile();
 			
 			if(file != null) {
 				if(file.isDirectory()) {
+					//TODO: support folder loading for not scripts?
+					mode = Mode.SCRIPTFILE;
 					loadFolder(file);
 				}
 				else {
@@ -273,7 +290,7 @@ public class MainWindow extends JFrame {
 		generateN2DImage.addActionListener(event -> {
 			JFileChooser c = new JFileChooser();
 			c.setFileSelectionMode(JFileChooser.FILES_AND_DIRECTORIES);
-			c.setFileFilter(new N2dFileFilter());
+			//c.setFileFilter(new N2dFileFilter());
 			c.showOpenDialog(this);
 			File targetFile = c.getSelectedFile();
 			
@@ -309,16 +326,19 @@ public class MainWindow extends JFrame {
 			c.showOpenDialog(this);
 			File[] targetFiles = c.getSelectedFiles();
 			
-			c.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
-			c.setFileFilter(null);
-			c.setMultiSelectionEnabled(false);
-			c.showSaveDialog(this);
-			File saveDir = c.getSelectedFile();
-			
-			if(saveDir == null) {
-				saveDir = targetFiles[0].getParentFile();
+			if(targetFiles.length != 0) {
+				c.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
+				c.setFileFilter(null);
+				c.setMultiSelectionEnabled(false);
+				c.showSaveDialog(this);
+				File saveDir = c.getSelectedFile();
+				
+				if(saveDir == null) {
+					saveDir = targetFiles[0].getParentFile();
+				}
+				TileMaker.makeTiles(targetFiles, saveDir);
 			}
-			TileMaker.makeTiles(targetFiles, saveDir);
+			
 		});
 		
 		pngToBtx.addActionListener(event -> {
@@ -327,6 +347,10 @@ public class MainWindow extends JFrame {
 			c.setDialogTitle("Select a PNG file");
 			c.showOpenDialog(this);
 			File png = c.getSelectedFile();
+			
+			if(png == null) {
+				return;
+			}
 			
 			c.setFileFilter(null);
 			c.setDialogTitle("Select the file to write to");
@@ -379,67 +403,32 @@ public class MainWindow extends JFrame {
 			int index = fileList.getSelectedIndex();
 			
 			if(index != -1) {
-				if(currentScript != null) {
-					for(Conversation convo : currentScript.getConvoMap().values()) {
-						for(ConvoSubBlockData block : convo.getBlockList()) {
-							block.resetNewStrings();
-						}
-					}
-				}
-			
+				currentAdapter.resetCurrentData();
+				
 				//might need a is this file still here check
-				currentScript = fileList.getSelectedValue();
-				populateIDs();
+				switch(mode) {
+					case SCRIPTFILE:
+						currentAdapter.updateCurrentScript(fileList.getSelectedIndex());
+						break;
+					case ITEMLINKINFO:
+						//do nothing since all the data is already loaded
+						break;
+					default:
+						break;
+				}
 				
-				updateComponents = false;
-				blockSpinnerModel.setMinimum(-1); //really roundabout way of always forcing the first block to be rendered
-				blockSpinnerModel.setValue(-1);
-				blockSpinnerModel.setMaximum(currentConvo.getBlockList().size() - 1);
-				blockSpinnerModel.setMinimum(0);
-				updateComponents = true;
-				blockSpinnerModel.setValue(0);
-				
-				blockMaxLabel.setText("of " + (currentConvo.getBlockList().size() - 1));
+				populateIDs(); //will force a combo action
 			}
 			else {
 				clearComponents();
 			}	
 		});
 		
-		blockSpinner.addChangeListener(event -> {
+		convoIdCombo.addActionListener(event -> {
 			if(!updateComponents) {
 				return;
 			}
-			if(currentBlock != null) {
-				saveText();
-			}
-			
-			currentBlock = currentConvo.getBlockList().get((int) blockSpinner.getValue());
-			
-			if(currentBlock.getMagic() == ConvoMagic.MULTIPLECHOICE) {
-				currentPanel = multipleChoicePanel;
-				multipleChoicePanel.setVisible(true);
-				regularTextPanel.setVisible(false);
-			}
-			else {
-				currentPanel = regularTextPanel;
-				multipleChoicePanel.setVisible(false);
-				regularTextPanel.setVisible(true);
-			}
-			
-			currentPanel.loadStrings(currentBlock, currentFontMap);
-			setScriptingState();
-		});
-		
-		scriptingCheck.addItemListener(event -> {
-			setScriptingState();
-		});
-		
-		convoCombo.addActionListener(event -> {
-			if(!updateComponents) {
-				return;
-			}
-			int index = convoCombo.getSelectedIndex();
+			int index = convoIdCombo.getSelectedIndex();
 			
 			/*
 			if(currentScript != null && currentConvo != null) {
@@ -449,18 +438,68 @@ public class MainWindow extends JFrame {
 			}
 			*/
 		
-			currentConvo = currentScript.getConvoMap().get(index);
-			System.out.println(currentConvo.getId() + " " + Integer.toHexString(currentConvo.getId()));
+			currentAdapter.updateCurrentConversation(index);
+			Conversation currentConvo = currentAdapter.getCurrentConversation();
+			if(currentConvo != null) {
+				System.out.println(currentConvo.getId() + " " + Integer.toHexString(currentConvo.getId()));
+			}
+			
+			int maxBlocks = currentAdapter.getMaxBlocks();
 			
 			updateComponents = false;
 			blockSpinnerModel.setMinimum(-1); //really roundabout way of always forcing the first block to be rendered
 			blockSpinnerModel.setValue(-1);
-			blockSpinnerModel.setMaximum(currentConvo.getBlockList().size() - 1);
+			blockSpinnerModel.setMaximum(maxBlocks);
 			blockSpinnerModel.setMinimum(0);
 			updateComponents = true;
-			blockSpinnerModel.setValue(0);
+			blockSpinnerModel.setValue(0); //forces blockspinner update
 			
-			blockMaxLabel.setText("of " + (currentConvo.getBlockList().size() - 1));
+			blockMaxLabel.setText("of " + maxBlocks);
+		});
+		
+		blockSpinner.addChangeListener(event -> {
+			if(!updateComponents) {
+				return;
+			}
+			if(currentAdapter.getCurrentConvoBlock() != null) {
+				saveText();
+			}
+			
+			int index = (int) blockSpinner.getValue();
+			currentAdapter.updateCurrentConvoBlock(index); //updates string for itemlinkinfo
+			
+			switch(mode) {
+				case SCRIPTFILE:
+					ConvoSubBlockData currentBlock = currentAdapter.getCurrentConvoBlock();
+					if(currentBlock == null) {
+						return;
+					}
+					
+					if(currentBlock.getMagic() == ConvoMagic.MULTIPLECHOICE) {
+						currentPanel = multipleChoicePanel;
+						multipleChoicePanel.setVisible(true);
+						regularTextPanel.setVisible(false);
+					}
+					else {
+						currentPanel = regularTextPanel;
+						multipleChoicePanel.setVisible(false);
+						regularTextPanel.setVisible(true);
+					}
+					
+					currentPanel.loadStrings(currentBlock, currentFontMap);
+					break;
+				case ITEMLINKINFO:
+					String oldString = currentAdapter.getOriginalMainString();
+					
+					currentPanel.loadStrings(oldString, currentAdapter.getNewMainString(oldString), currentFontMap);
+					break;
+			}
+				
+			setScriptingState();
+		});
+		
+		scriptingCheck.addItemListener(event -> {
+			setScriptingState();
 		});
 		
 		saveFileButton.addActionListener(event -> {
@@ -470,38 +509,22 @@ public class MainWindow extends JFrame {
 		f10Button.addActionListener(event -> {
 			currentFontMap = font10Map;
 			currentPanel.setCurrentFontMap(currentFontMap);
-			if(currentPanel == regularTextPanel) {
-				regularTextPanel.splitString();
-			}
 		});
 		
 		f12Button.addActionListener(event -> {
 			currentFontMap = font12Map;
 			currentPanel.setCurrentFontMap(currentFontMap);
-			if(currentPanel == regularTextPanel) {
-				regularTextPanel.splitString();
-			}
 		});
 	}
 	
 	private void populateIDs() {
 		updateComponents = false;
 		idComboModel.removeAllElements();
-		List<Integer> usedIDs = currentScript.getUsedConvoIDs();
 		
-		for(Entry<Integer, Conversation> entry : currentScript.getConvoMap().entrySet()) {
-			String key = entry.getKey().toString();
-			if(usedIDs.contains(entry.getValue().getId())) {
-				idComboModel.addElement(key);
-			}
-			else {
-				idComboModel.addElement(key + " (UNUSED)");
-			}
-		}
-
+		idComboModel.addAll(currentAdapter.generateIDList());
 		updateComponents = true;
 		if(idComboModel.getSize() > 0) {
-			convoCombo.setSelectedIndex(0);
+			convoIdCombo.setSelectedIndex(0);
 		}
 	}
 	
@@ -511,12 +534,13 @@ public class MainWindow extends JFrame {
 				return true;
 			}
 			else {
-				if(filepath.getName().contains(filter) && filepath.getName().contains(".n2d")) {
+				
+				//if(filepath.getName().contains(filter) && filepath.getName().contains(".n2d")) {
 					return true;
-				}
-				else {
-					return false;
-				}
+				//}
+				//else {
+				//	return false;
+				//}
 			}
 		});
 		
@@ -538,10 +562,10 @@ public class MainWindow extends JFrame {
 	
 	private void setScriptingState() {
 		if(!scriptingCheck.isSelected()) {
-			currentPanel.loadOriginalString(currentBlock);
+			currentPanel.loadOriginalString(currentAdapter);
 		}
 		else {
-			currentPanel.removeStringFormatting(currentBlock);
+			currentPanel.removeStringFormatting(currentAdapter);
 		}
 	}
 	
@@ -552,175 +576,100 @@ public class MainWindow extends JFrame {
 	}
 	
 	private void saveText() {
-		currentPanel.saveStrings(currentBlock);
+		currentPanel.saveStrings(currentAdapter);
 	}
 	
 	private void writeFile() {
-		//byte length of the string length (byte/short)
-		final int DIALOGUEBYTELENGTH = 2;
-		final int NONDIALOGUEBYTELENGTH = 1;
-		final int TEXTENTRYBYTELENGTH = 2;
-		final int MULTIPLECHOICEBYTELENGTH = 2;
-		final int SPEAKERBYTELENGTH = 1;
-		final byte[] CONVERSATIONMARKER = {0x0A, 0x09, 0x19, 0x00};
-		
-		File originalFile = scriptMap.get(currentScript);
-		File tempFile;
-		File backupFile = new File(originalFile.getAbsolutePath() + ".bak");
-		FileOutputStream fw;
-		int originalFileIndex = 0;
-		byte[] fullFileBytes = currentScript.getFullFileBytes();
-		
-		//write gets upset if >255 and need to pad 00s anyway
-		ByteBuffer fourByteBuffer = ByteBuffer.allocate(4);
-		fourByteBuffer.order(ByteOrder.LITTLE_ENDIAN);
-		
-		ByteBuffer twoByteBuffer = ByteBuffer.allocate(2);
-		twoByteBuffer.order(ByteOrder.LITTLE_ENDIAN);
-		
 		saveText();
+		int index = fileListModel.indexOf(currentAdapter.getCurrentScript());
 		
-		try {
-			tempFile = File.createTempFile(originalFile.getName(), ".tmp", originalFile.getParentFile());
-			tempFile.deleteOnExit();
-			fw = new FileOutputStream(tempFile);
+		currentAdapter.writeFile();
 		
-			for(Conversation convo : currentScript.getConvoMap().values()) {
-				ByteArrayOutputStream convoStream = new ByteArrayOutputStream();
-				int convoHeaderExtraBytes = convo.getStartOffset() != 0 ? 8 : 4;
-				int convoLength = convo.getLength();
-				
-				//write any non text containing convos, skip convo length and magic
-				fw.write(fullFileBytes, originalFileIndex, convo.getStartOffset() - originalFileIndex);
-				originalFileIndex += (convo.getStartOffset() + convoHeaderExtraBytes) - originalFileIndex;
-				
-				for(ConvoSubBlockData block : convo.getBlockList()) {
-					byte[] mainStringArray;
-					byte[] extraInfoArray = null;
-					ByteArrayOutputStream blockStream = new ByteArrayOutputStream();
-					ConvoMagic magic = block.getMagic();
-					int length = DIALOGUEBYTELENGTH;
-					int blockOffset = 0;
-					int firstTextStart = magic == ConvoMagic.TEXTENTRY ? ((ExtraStringConvoData) block).getExtraInfoStartOffset()
-							: block.getTextStartOffset();
-					int blockLength = block.getOldFullBlockLength();
-					
-					//write any non text blocks that occur before this one
-					convoStream.write(fullFileBytes, originalFileIndex, block.getStartOffset() - originalFileIndex);
-					originalFileIndex += block.getStartOffset() - originalFileIndex;
-						
-					try {
-						//combine new strings with block
-						int blockPostLengthOffset = block.getStartOffset() + 3; //3 = id + two byte overall length
-						blockStream.write(fullFileBytes, blockPostLengthOffset, firstTextStart - blockPostLengthOffset); //get bytes between start and string
-						blockOffset = firstTextStart;
-						
-						switch(magic) {
-							case NONDIALOGUE:
-								length = NONDIALOGUEBYTELENGTH;
-							case DIALOGUE:				
-								mainStringArray = block.getNewTextString().getBytes("Shift-JIS");
-								if(length == NONDIALOGUEBYTELENGTH) {
-									blockStream.write(Integer.valueOf(mainStringArray.length).byteValue());
-								}
-								else {
-									blockStream.writeBytes(twoByteBuffer.putShort(0, (short) mainStringArray.length).array());
-								}
-								blockStream.writeBytes(mainStringArray);
-								blockOffset += block.getOldTextLength() + length;
-								
-								if(block.hasExtraString()) {
-									extraInfoArray = ((ExtraStringConvoData) block).getNewExtraInfoString().getBytes("Shift-JIS");
-									blockStream.write(fullFileBytes, blockOffset, ((ExtraStringConvoData) block).getExtraInfoStartOffset() - blockOffset); //everything in between main and speaker
-									blockStream.write(Integer.valueOf(extraInfoArray.length).byteValue());
-									blockStream.writeBytes(extraInfoArray);
-									blockOffset = ((ExtraStringConvoData) block).getExtraInfoStartOffset() + ((ExtraStringConvoData) block).getOldExtraInfoLength() + SPEAKERBYTELENGTH;
-								}
-								break;
-							case TEXTENTRY:	
-								extraInfoArray = ((ExtraStringConvoData) block).getNewExtraInfoString().getBytes("Shift-JIS");
-								blockStream.writeBytes(twoByteBuffer.putShort(0, (short) extraInfoArray.length).array());
-								blockStream.writeBytes(extraInfoArray);
-								blockOffset += ((ExtraStringConvoData) block).getOldExtraInfoLength() + TEXTENTRYBYTELENGTH;
-								
-								if(block.hasMainString()) { //text entry strings are end to end
-									mainStringArray = block.getNewTextString().getBytes("Shift-JIS");
-									blockStream.writeBytes(twoByteBuffer.putShort(0, (short) mainStringArray.length).array());
-									blockStream.writeBytes(mainStringArray);
-									blockOffset = block.getTextStartOffset() + block.getOldTextLength() + TEXTENTRYBYTELENGTH;
-								}
-								break;
-							case MULTIPLECHOICE:
-								int stringCount = 0;
-								for(String string : ((MultipleChoiceConvoData) block).getNewStrings()) {
-									mainStringArray = string.getBytes("Shift-JIS");
-									blockStream.writeBytes(twoByteBuffer.putShort(0, (short) mainStringArray.length).array());
-									blockStream.writeBytes(mainStringArray);
-									stringCount++;
-								}
-								blockOffset = block.getTextStartOffset() + stringCount * MULTIPLECHOICEBYTELENGTH
-										+ ((MultipleChoiceConvoData) block).getOriginalTotalStringsLength();
-								break;
-						}
-						
-					}
-					catch (UnsupportedEncodingException e) {
-					}
-					
-					int bytesRead = blockOffset - (block.getStartOffset() + 3);
-					if(bytesRead < blockLength) {
-						blockStream.write(fullFileBytes, blockOffset, blockLength - bytesRead);
-					}
-					
-					//should have all the bytes except for magic and the total blockLength
-					convoStream.write(block.getMagic().getValue());
-					convoStream.writeBytes(twoByteBuffer.putShort(0, (short) blockStream.size()).array());
-					blockStream.writeTo(convoStream);
-					originalFileIndex += (blockLength + 3);
-				}
-				//the length of convo blocks does include the magic, unlike dialogue blocks
-				int bytesRead = originalFileIndex - (convo.getStartOffset() + convoHeaderExtraBytes);
-				if(bytesRead < convoLength) {
-					convoStream.write(fullFileBytes, originalFileIndex, convoLength - bytesRead);
-					originalFileIndex += convoLength - bytesRead;// + convoHeaderExtraBytes;
-				}	
-				
-				//now should have everything but the convo magic and length in stream
-				if(convo.getStartOffset() != 0) {
-					fw.write(fourByteBuffer.putInt(0, convoStream.size()).array());
-					fw.write(CONVERSATIONMARKER);
-				}
-				else { //for one convo files
-					fw.write(CONVERSATIONMARKER);
-				}
-				convoStream.writeTo(fw);
-			}
+		reloadFile(index);
+	}
+	
+	private void reloadFile(int index) {
+		index = index == -1 ? 0 : index;
 		
-			//write anything else that's left
-			if(originalFileIndex < fullFileBytes.length) {
-				fw.write(fullFileBytes, originalFileIndex, fullFileBytes.length - originalFileIndex);
-			}
-			fw.close();
-			if(backupFile.exists()) {
-				backupFile.delete();
-			}
-			originalFile.renameTo(backupFile);
-			tempFile.renameTo(originalFile);
-		}
-		catch (IOException e) {
-		}
-		
-		reloadFile(scriptMap.get(currentScript));
+		switch(mode) {
+			case SCRIPTFILE:
+				fileListModel.set(index, currentAdapter.getCurrentScript().toString());
+				fileList.clearSelection();
+				fileList.setSelectedIndex(index);
+				break;
+			case ITEMLINKINFO:
+				//just reload the entire filelist
+				fileListModel.clear();
+				fileListModel.addAll(ilAdapter.getLoadedFilenames());
+				fileList.setSelectedIndex(0);
+				break;
+		}		
 	}
 	
 	private void loadFile(File file) { //dump old list, load one file
-		ScriptParser script = new ScriptParser(file);
+		Mode previousMode = mode;
+		String fileName = file.getName().toLowerCase();
+		ByteBuffer magic = ByteBuffer.allocate(4);
+		magic.order(ByteOrder.LITTLE_ENDIAN);
+
+		if(ITEMLINKINFOFILES.contains(fileName)) {
+			if(previousMode != Mode.ITEMLINKINFO) {
+				fileListModel.clear();
+			}
+			
+			mode = Mode.ITEMLINKINFO;
+			ilAdapter.addFile(file, fileName);
+			currentAdapter = ilAdapter;
+			fileListModel.addElement(fileName);
+			
+			fileList.clearSelection();
+			fileList.setSelectedIndex(0);
+			return;
+		}
 		
+		try {
+			FileInputStream stream = new FileInputStream(file);
+			stream.read(magic.array());
+			stream.close();
+		}
+		catch (FileNotFoundException e) {
+			return;
+		}
+		catch (IOException e) {
+			return;
+		}
+		
+		switch(magic.getInt()) {
+			case 0x001F080A:
+				fileListModel.clear();
+				mode = Mode.SCRIPTFILE;
+				currentAdapter = spAdapter;
+				ScriptParser script = new ScriptParser(file);
+				Map<ScriptParser, File> scriptMap = spAdapter.getScriptMap();
+				scriptMap.clear();
+				scriptMap.put(script, file);
+				fileListModel.addElement(script.toString());
+				break;
+			default:
+				break;
+		}
+		
+		fileList.clearSelection();
+		fileList.setSelectedIndex(0);
+	}
+	
+	private void loadFolder(File dir) {
+		Map<ScriptParser, File> scriptMap = currentAdapter.getScriptMap();
 		fileListModel.clear();
 		scriptMap.clear();
-		scriptMap.put(script, file);
-		fileListModel.addElement(script);
-		fileList.clearSelection();
+		
+		for(File file: dir.listFiles(new BinFileFilter())) {
+			ScriptParser script = new ScriptParser(file);
+			if(script.getConvoMap().size() > 0) {
+				scriptMap.put(script, file);
+				fileListModel.addElement(script.toString());
+			}
+		}
 		fileList.setSelectedIndex(0);
 	}
 	
@@ -809,35 +758,14 @@ public class MainWindow extends JFrame {
 		}
 	}
 	
-	private void loadFolder(File dir) {
-		fileListModel.clear();
-		scriptMap.clear();
-		
-		for(File file: dir.listFiles(new BinFileFilter())) {
-			ScriptParser script = new ScriptParser(file);
-			if(script.getConvoMap().size() > 0) {
-				scriptMap.put(script, file);
-				fileListModel.addElement(script);
-				
-			}
-		}
-		fileList.setSelectedIndex(0);
-	}
-	
-	private void reloadFile(File file) {
-		int index = fileListModel.indexOf(currentScript);
-		ScriptParser script = new ScriptParser(file);
-		scriptMap.remove(currentScript);
-		scriptMap.put(script, file);
-		fileListModel.set(index, script);
-		fileList.clearSelection();
-		fileList.setSelectedIndex(index);
-	}
-	
 	private void addGB(Component comp, int x, int y) {
 		gbcon.gridx = x;
 		gbcon.gridy = y;
 		add(comp, gbcon);
+	}
+	
+	public Mode getMode() {
+		return mode;
 	}
 	
 	public static class NoDeselectionModel extends DefaultListSelectionModel {

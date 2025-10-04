@@ -51,9 +51,8 @@ public class MultipleChoicePanel extends DataPanel {
 		}
 	}
 	
-	public void saveStrings(ConvoSubBlockData currentBlock) {
-		MultipleChoiceConvoData block = (MultipleChoiceConvoData) currentBlock;
-		List<String> newStrings = block.getNewStrings();
+	public void saveStrings(DataAdapter adapter) {
+		List<String> newStrings = adapter.getNewStrings();
 		
 		for(int i = 0; i < newStrings.size(); i++) {
 			newStrings.set(i, subpanelList.get(i).getNewText());
@@ -64,17 +63,17 @@ public class MultipleChoicePanel extends DataPanel {
 		
 	}
 	
-	public void loadOriginalString(ConvoSubBlockData currentBlock) {
-		MultipleChoiceConvoData block = (MultipleChoiceConvoData) currentBlock;
-		
-		List<String> originalStrings = block.getOriginalStrings();
-		for(int i = 0; i < originalStrings.size(); i++) {
-			TextOptionPanel panel = subpanelList.get(i);
-			panel.setOriginalText(originalStrings.get(i));
+	public void loadOriginalString(DataAdapter adapter) {
+		List<String> originalStrings = adapter.getOriginalStrings();
+		if(originalStrings != null) {
+			for(int i = 0; i < originalStrings.size(); i++) {
+				TextOptionPanel panel = subpanelList.get(i);
+				panel.setOriginalText(originalStrings.get(i));
+			}
 		}
 	}
 
-	public void removeStringFormatting(ConvoSubBlockData currentBlock) {
+	public void removeStringFormatting(DataAdapter adapter) {
 		for(TextOptionPanel panel : subpanelList) {
 			if(!panel.getOriginalText().equals("")) {
 				String string = panel.getOriginalText();
@@ -129,5 +128,11 @@ public class MultipleChoicePanel extends DataPanel {
 		public void setTextEnabled(boolean enabled) {
 			newText.setEnabled(enabled);
 		}
+	}
+
+	@Override
+	public void loadStrings(String oldString, String newString, Map<String, Integer> currentFontMap) {
+		// TODO Auto-generated method stub
+		
 	}
 }

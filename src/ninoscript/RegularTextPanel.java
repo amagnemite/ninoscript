@@ -1,5 +1,6 @@
 package ninoscript;
 
+import java.awt.Dimension;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
@@ -7,10 +8,12 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 
 import javax.swing.BorderFactory;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
+import javax.swing.JScrollPane;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
 import javax.swing.event.DocumentEvent;
@@ -60,37 +63,45 @@ public class RegularTextPanel extends DataPanel {
 		originalText.setFont(getFont());
 		newText.setFont(getFont());
 		
+		JScrollPane originalTextScroll = new JScrollPane(originalText, JScrollPane.VERTICAL_SCROLLBAR_NEVER, JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+		JScrollPane newTextScroll = new JScrollPane(newText, JScrollPane.VERTICAL_SCROLLBAR_NEVER, JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+		
 		GridBagConstraints c = new GridBagConstraints();
+		
+		//top main text
 		JPanel originalTextPanel = new JPanel();
 		originalTextPanel.setLayout(new GridBagLayout());
-		c = new GridBagConstraints();
 		originalTextPanel.setBorder(BorderFactory.createTitledBorder("Original text"));
-
-		c.gridy = 0;
+		
 		c.gridx = 0;
+		c.gridy = 0;
+		//originalTextPanel.add(originalTextScroll, c);
 		originalTextPanel.add(originalText, c);
 		
-		c.gridx = 1;
+		c.gridx = GridBagConstraints.RELATIVE;
 		c.anchor = GridBagConstraints.NORTH;
 		c.ipadx = 4;
 		c.insets = new Insets(2, 0, 0, 0);
 		originalTextPanel.add(originalLengths, c);
 		
+		//bottom main text
+		c = new GridBagConstraints();
 		JPanel newTextPanel = new JPanel();
 		newTextPanel.setLayout(new GridBagLayout());
-		c = new GridBagConstraints();
 		newTextPanel.setBorder(BorderFactory.createTitledBorder("Modified text"));
 		
 		c.gridy = 0;
 		c.gridx = 0;
 		newTextPanel.add(newText, c);
+		//newTextPanel.add(newTextScroll, c);
 		
-		c.gridx = 1;
+		c.gridx = GridBagConstraints.RELATIVE;
 		c.anchor = GridBagConstraints.NORTH;
 		c.ipadx = 4;
 		c.insets = new Insets(2, 0, 0, 0);
 		newTextPanel.add(newLengths, c);
 		
+		//extra text panels only consist of the border + textfield
 		originalExtraPanel.setBorder(BorderFactory.createTitledBorder(ORIGINALSPEAKER));
 		originalExtraPanel.add(originalExtraField);
 		
@@ -103,7 +114,10 @@ public class RegularTextPanel extends DataPanel {
 		c.gridx = 0;
 		c.gridy = 0;
 		c.gridheight = 2;
+		//c.weightx = 0.7;
+		//c.fill = GridBagConstraints.BOTH;
 		add(originalTextPanel, c);
+		
 		c.gridy = GridBagConstraints.RELATIVE;
 		c.gridheight = GridBagConstraints.REMAINDER;
 		add(newTextPanel, c);
@@ -111,14 +125,19 @@ public class RegularTextPanel extends DataPanel {
 		c.gridx = 1;
 		c.gridy = 0;
 		c.gridheight = 1;
+		//c.weightx = 0.3;
+		//c.fill = GridBagConstraints.NONE;
 		add(originalExtraPanel, c);
+		
 		c.gridy = GridBagConstraints.RELATIVE;
 		add(sideLabel, c);
+		
 		c.gridy = GridBagConstraints.RELATIVE;
 		add(newExtraPanel, c);
 		
-		originalText.setPreferredSize(getSize());
-		newText.setPreferredSize(getSize());
+		//jtextareas don't seem to dynamically resize, so easier to just define the area
+		originalText.setPreferredSize(new Dimension(300, 150));
+		newText.setPreferredSize(new Dimension(300, 150));
 		
 		initListeners();
 	}
@@ -207,6 +226,22 @@ public class RegularTextPanel extends DataPanel {
 			}
 		});
 	}
+	
+	public void loadStrings(String originalString, String newString, Map<String, Integer> currentFontMap) {
+		setCurrentFontMap(currentFontMap);
+		
+		originalExtraField.setText("");
+		newExtraField.setText("");
+		newExtraField.setEnabled(false);
+		sideLabel.setText("");
+		
+		newText.setText(newString);
+		
+		currentString = newText.getText();
+		
+		splitOldString(originalString);
+		splitString();
+	}
 
 	public void loadStrings(ConvoSubBlockData currentBlock, Map<String, Integer> currentFontMap) {
 		ConvoMagic magic = currentBlock.getMagic();
@@ -268,7 +303,34 @@ public class RegularTextPanel extends DataPanel {
 		
 		currentString = newText.getText();
 		
-		List<String> splits = Arrays.asList(currentBlock.getTextString().split("\n"));
+		splitOldString(currentBlock.getTextString());
+		splitString();
+	}
+
+	public void saveStrings(DataAdapter adapter) {
+		adapter.writeNewMainString(newText.getText());
+		adapter.writeNewExtraString(newExtraField.getText());
+	}
+	
+	public void loadOriginalString(DataAdapter adapter) {
+		originalText.setText(adapter.getOriginalMainString());
+	}
+	
+	public void removeStringFormatting(DataAdapter adapter) {
+		String string = adapter.getOriginalMainString();
+		string = stripFormatting(string);
+		originalText.setText(string);
+	}
+	
+	public void clearComponents() {
+		originalText.setText("");
+		newText.setText("");
+		originalExtraField.setText("");
+		newExtraField.setText("");
+	}
+	
+	private void splitOldString(String originalString) {
+		List<String> splits = Arrays.asList(originalString.split("\n"));
 		for(int i = 0; i < MAXLINES; i++) {
 			if(i < splits.size()) {
 				if(currentFontMap != null) {
@@ -282,41 +344,6 @@ public class RegularTextPanel extends DataPanel {
 				originalLengths.setLabelText(i, -1);
 			}
 		}
-		
-		splitString();
-	}
-
-	public void saveStrings(ConvoSubBlockData currentBlock) {
-		if(currentBlock.getSharedStringList() != null) { //multiple choice doesn't have as many shared strings
-			for(ConvoSubBlockData block : currentBlock.getSharedStringList()) {
-				block.setNewTextString(newText.getText());
-			}
-		}
-		else {
-			currentBlock.setNewTextString(newText.getText());
-		}
-		
-		//for now keep speakers separate, but i think most of them are the same
-		if(currentBlock.hasExtraString()) {
-			((ExtraStringConvoData) currentBlock).setNewExtraInfoString(newExtraField.getText());
-		}
-	}
-	
-	public void loadOriginalString(ConvoSubBlockData currentBlock) {
-		originalText.setText(currentBlock.getTextString());
-	}
-	
-	public void removeStringFormatting(ConvoSubBlockData currentBlock) {
-		String string = currentBlock.getTextString();
-		string = stripFormatting(string);
-		originalText.setText(string);
-	}
-	
-	public void clearComponents() {
-		originalText.setText("");
-		newText.setText("");
-		originalExtraField.setText("");
-		newExtraField.setText("");
 	}
 	
 	//TODO: this sometimes acts up
@@ -373,6 +400,11 @@ public class RegularTextPanel extends DataPanel {
 			newLineLocs.add(-1);
 			arrayIndex++;
 		}
+	}
+	
+	public void setCurrentFontMap(Map<String, Integer> currentFontMap) {
+		this.currentFontMap = currentFontMap;
+		splitString();
 	}
 	
 	private class LengthPanel extends JPanel {

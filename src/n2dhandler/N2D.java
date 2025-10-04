@@ -74,6 +74,7 @@ public class N2D {
 	
 	public void generateImages(File targetDir) {
 		if(subFiles.get(PALETTEVAL) == null) { //some n2ds don't have palettes, not sure how they work
+			System.out.println("no palette");
 			return;
 		}
 		
@@ -84,6 +85,7 @@ public class N2D {
 			getScreen(targetDir, subFiles.get(SCREENVAL));
 		}
 		else { //also rare instances of only a palette with no tiles + cells/scr
+			System.out.println("no tiles");
 			return;
 		}
 	}
@@ -491,6 +493,7 @@ public class N2D {
 		BufferedImage image = new BufferedImage(screenWidth, screenHeight, BufferedImage.TYPE_INT_ARGB);
 		Graphics g = image.getGraphics();
 		
+		//TODO: some nscrs use 1 byte rotation mode
 		for(int h = 0; h < maxVerticalTiles; h++) {
 			for(int w = 0; w < maxHorizontalTiles; w++) {
 				int data = nscrBuffer.getShort();

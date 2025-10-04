@@ -9,10 +9,11 @@ public abstract class DataPanel extends JPanel {
 	
 	protected Map<String, Integer> currentFontMap = null;
 	
+	public abstract void loadStrings(String oldString, String newString, Map<String, Integer> currentFontMap);
 	public abstract void loadStrings(ConvoSubBlockData currentBlock, Map<String, Integer> currentFontMap);
-	public abstract void saveStrings(ConvoSubBlockData currentBlock);
-	public abstract void loadOriginalString(ConvoSubBlockData currentBlock);
-	public abstract void removeStringFormatting(ConvoSubBlockData currentBlock);
+	public abstract void saveStrings(DataAdapter adapter);
+	public abstract void loadOriginalString(DataAdapter adapter);
+	public abstract void removeStringFormatting(DataAdapter adapter);
 	public abstract void clearComponents();
 	
 	protected String stripFormatting(String string) {
