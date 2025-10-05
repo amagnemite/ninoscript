@@ -7,6 +7,7 @@ import java.io.UnsupportedEncodingException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -14,13 +15,14 @@ import java.util.Set;
 import java.util.TreeMap;
 
 public class ItemLinkInfoDataAdapter extends DataAdapter {
-	private Map<String, String> strings = new HashMap<String, String>(); //old string, new string
+	private Map<String, String> strings = new LinkedHashMap<String, String>(); //old string, new string
 	private Map<String, File> loadedFiles = new HashMap<String, File>();
 	private Map<String, ItemLinkInfoParser> parsers = new HashMap<String, ItemLinkInfoParser>();
 	
 	private String currentOldString = null;
 	
 	public void addFile(File file, String fileName) {
+		//TODO: add a way to reload files and reset their keyvals
 		if(!loadedFiles.containsKey(fileName)) {
 			loadedFiles.put(fileName, file);
 			
@@ -65,12 +67,6 @@ public class ItemLinkInfoDataAdapter extends DataAdapter {
 
 	public int getMaxBlocks() {
 		return strings.size() - 1;
-	}
-
-	@Override
-	public ConvoSubBlockData getCurrentConvoBlock() {
-		// TODO Auto-generated method stub
-		return null;
 	}
 
 	public void updateCurrentConvoBlock(int index) {
@@ -140,7 +136,9 @@ public class ItemLinkInfoDataAdapter extends DataAdapter {
 	}
 
 	public void writeNewMainString(String newString) {
-		strings.put(currentOldString, newString);
+		if(currentOldString != null) {
+			strings.put(currentOldString, newString);
+		}
 	}
 	
 	public Set<String> getLoadedFilenames() {

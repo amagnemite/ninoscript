@@ -8,13 +8,13 @@ import java.io.UnsupportedEncodingException;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 public class ItemLinkInfoParser {
 	public static final int TEXTLENGTH = 81;
 	private int lineCount = 0;
-	private Map<String, ArrayList<Integer>> stringMap = new HashMap<String, ArrayList<Integer>>();
+	private Map<String, ArrayList<Integer>> stringMap = new LinkedHashMap<String, ArrayList<Integer>>();
 	
 	public ItemLinkInfoParser(File file) {
 		byte[] fullFileBytes;

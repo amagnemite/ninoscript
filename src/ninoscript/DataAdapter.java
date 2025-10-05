@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Map;
 
 //bridge between data objects like scriptparser and regulartextpanel
+//stores the currently active string/s
 public abstract class DataAdapter {
 	public abstract Map<ScriptParser, File> getScriptMap();
 	public abstract List<String> generateIDList();
@@ -12,11 +13,9 @@ public abstract class DataAdapter {
 	public abstract ScriptParser getCurrentScript();
 	public abstract void setCurrentScript(ScriptParser sp);
 	public abstract int getMaxBlocks();
-	public abstract ConvoSubBlockData getCurrentConvoBlock();
 	public abstract void updateCurrentConvoBlock(int index);
 	public abstract void writeFile();
 	public abstract String getOriginalMainString();
-	//public abstract String getOriginalMainString(int index);
 	public abstract String getNewMainString(String key);
 	public abstract void writeNewMainString(String newString);
 	

@@ -88,6 +88,10 @@ public class ScriptParserDataAdapter extends DataAdapter {
 	}
 	
 	public void writeNewMainString(String newString) {
+		if(currentBlock == null) {
+			return;
+		}
+		
 		if(currentBlock.getSharedStringList() != null) { //multiple choice doesn't have as many shared strings
 			for(ConvoSubBlockData block : currentBlock.getSharedStringList()) {
 				block.setNewTextString(newString);

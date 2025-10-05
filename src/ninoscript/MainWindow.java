@@ -403,11 +403,10 @@ public class MainWindow extends JFrame {
 			int index = fileList.getSelectedIndex();
 			
 			if(index != -1) {
-				currentAdapter.resetCurrentData();
-				
 				//might need a is this file still here check
 				switch(mode) {
 					case SCRIPTFILE:
+						currentAdapter.resetCurrentData();
 						currentAdapter.updateCurrentScript(fileList.getSelectedIndex());
 						break;
 					case ITEMLINKINFO:
@@ -461,16 +460,14 @@ public class MainWindow extends JFrame {
 			if(!updateComponents) {
 				return;
 			}
-			if(currentAdapter.getCurrentConvoBlock() != null) {
-				saveText();
-			}
+			saveText();
 			
 			int index = (int) blockSpinner.getValue();
 			currentAdapter.updateCurrentConvoBlock(index); //updates string for itemlinkinfo
 			
 			switch(mode) {
 				case SCRIPTFILE:
-					ConvoSubBlockData currentBlock = currentAdapter.getCurrentConvoBlock();
+					ConvoSubBlockData currentBlock = spAdapter.getCurrentConvoBlock();
 					if(currentBlock == null) {
 						return;
 					}
