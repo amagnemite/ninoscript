@@ -54,17 +54,16 @@ import javax.swing.filechooser.FileFilter;
 import n2dhandler.N2D;
 import n2dhandler.TileMaker;
 import ninoscript.ConvoSubBlockData.*;
+import ninoscript.DatParser.DatType;
 import ninoscript.ScriptParser.ConvoMagic;
 
 @SuppressWarnings("serial")
 public class MainWindow extends JFrame {
 	public enum Mode {
 		SCRIPTFILE,
-		ITEMLINKINFO
+		ITEMLINKINFO,
+		GENERALDAT
 	}
-	
-	private static final Set<String> ITEMLINKINFOFILES = new HashSet<String>(Arrays.asList("equipitemlinkinfo.dat",
-			"itemlinkinfo.dat"));
 	
 	JMenuBar menuBar = new JMenuBar();
 	JMenu optionsMenu = new JMenu("Options");
@@ -104,6 +103,7 @@ public class MainWindow extends JFrame {
 	
 	private ScriptParserDataAdapter spAdapter = new ScriptParserDataAdapter();
 	private ItemLinkInfoDataAdapter ilAdapter = new ItemLinkInfoDataAdapter();
+	private DatParserDataAdapter datAdapter = new DatParserDataAdapter();
 	private DataAdapter currentAdapter = spAdapter;
 	private Mode mode = Mode.SCRIPTFILE;
 	
@@ -232,7 +232,6 @@ public class MainWindow extends JFrame {
 			if(file != null) {
 				if(file.isDirectory()) {
 					//TODO: support folder loading for not scripts?
-					mode = Mode.SCRIPTFILE;
 					loadFolder(file);
 				}
 				else {
@@ -407,11 +406,13 @@ public class MainWindow extends JFrame {
 				switch(mode) {
 					case SCRIPTFILE:
 						currentAdapter.resetCurrentData();
-						currentAdapter.updateCurrentScript(fileList.getSelectedIndex());
+						currentAdapter.updateCurrentScript(fileList.getSelectedValue());
 						break;
 					case ITEMLINKINFO:
 						//do nothing since all the data is already loaded
 						break;
+					case GENERALDAT:
+						
 					default:
 						break;
 				}
@@ -486,6 +487,7 @@ public class MainWindow extends JFrame {
 					currentPanel.loadStrings(currentBlock, currentFontMap);
 					break;
 				case ITEMLINKINFO:
+				case GENERALDAT:
 					String oldString = currentAdapter.getOriginalMainString();
 					
 					currentPanel.loadStrings(oldString, currentAdapter.getNewMainString(oldString), currentFontMap);
@@ -578,7 +580,7 @@ public class MainWindow extends JFrame {
 	
 	private void writeFile() {
 		saveText();
-		int index = fileListModel.indexOf(currentAdapter.getCurrentScript());
+		int index = fileListModel.indexOf(fileList.getSelectedIndex());
 		
 		currentAdapter.writeFile();
 		
@@ -590,7 +592,8 @@ public class MainWindow extends JFrame {
 		
 		switch(mode) {
 			case SCRIPTFILE:
-				fileListModel.set(index, currentAdapter.getCurrentScript().toString());
+			case GENERALDAT:
+				//fileListModel.set(index, spAdapter.getCurrentScript().toString());
 				fileList.clearSelection();
 				fileList.setSelectedIndex(index);
 				break;
@@ -604,69 +607,79 @@ public class MainWindow extends JFrame {
 	}
 	
 	private void loadFile(File file) { //dump old list, load one file
+		boolean foundFile = false;
 		Mode previousMode = mode;
-		String fileName = file.getName().toLowerCase();
+		String fileName = file.getName();
+		String newListItem = "";
 		ByteBuffer magic = ByteBuffer.allocate(4);
 		magic.order(ByteOrder.LITTLE_ENDIAN);
-
-		if(ITEMLINKINFOFILES.contains(fileName)) {
-			if(previousMode != Mode.ITEMLINKINFO) {
-				fileListModel.clear();
-			}
-			
-			mode = Mode.ITEMLINKINFO;
-			ilAdapter.addFile(file, fileName);
-			currentAdapter = ilAdapter;
-			fileListModel.addElement(fileName);
-			
-			fileList.clearSelection();
-			fileList.setSelectedIndex(0);
-			return;
-		}
 		
-		try {
-			FileInputStream stream = new FileInputStream(file);
-			stream.read(magic.array());
-			stream.close();
-		}
-		catch (FileNotFoundException e) {
-			return;
-		}
-		catch (IOException e) {
-			return;
-		}
-		
-		switch(magic.getInt()) {
-			case 0x001F080A:
-				fileListModel.clear();
-				mode = Mode.SCRIPTFILE;
-				currentAdapter = spAdapter;
-				ScriptParser script = new ScriptParser(file);
-				Map<ScriptParser, File> scriptMap = spAdapter.getScriptMap();
-				scriptMap.clear();
-				scriptMap.put(script, file);
-				fileListModel.addElement(script.toString());
+		//there are no good ways to identify these by content
+		switch(fileName.toLowerCase()) {
+			case "equipitemlinkinfo.dat":
+			case "itemlinkinfo.dat":
+				mode = Mode.ITEMLINKINFO;
+				ilAdapter.addFile(file);
+				currentAdapter = ilAdapter;
+				newListItem = fileName;
+				foundFile = true;
+				break;
+			case "iteminfo.dat":
+			case "equipiteminfo.dat":
+			case "spiteminfo.dat":
+				mode = Mode.GENERALDAT;
+				datAdapter.addFile(file, DatType.ITEMINFO);
+				currentAdapter = datAdapter;
+				newListItem = fileName;
+				foundFile = true;
 				break;
 			default:
 				break;
 		}
 		
-		fileList.clearSelection();
-		fileList.setSelectedIndex(0);
+		if(!foundFile) {
+			try {
+				FileInputStream stream = new FileInputStream(file);
+				stream.read(magic.array());
+				stream.close();
+			}
+			catch (IOException e) {
+				return;
+			}
+			
+			switch(magic.getInt()) {
+				case 0x001F080A:
+					mode = Mode.SCRIPTFILE;
+					currentAdapter = spAdapter;
+					newListItem = spAdapter.addFile(file);
+					foundFile = true;
+					break;
+				default:
+					break;
+			}
+		}
+		
+		if(foundFile) {
+			if(previousMode != mode) {
+				fileListModel.clear();
+			}
+			if(!fileListModel.contains(newListItem)) { //new addition
+				fileListModel.addElement(newListItem);
+			}
+			fileList.setSelectedValue(newListItem, true);
+		}
 	}
 	
 	private void loadFolder(File dir) {
-		Map<ScriptParser, File> scriptMap = currentAdapter.getScriptMap();
+		mode = Mode.SCRIPTFILE;
+		currentAdapter = spAdapter;
+		spAdapter.getScriptMap().clear();
 		fileListModel.clear();
-		scriptMap.clear();
 		
 		for(File file: dir.listFiles(new BinFileFilter())) {
-			ScriptParser script = new ScriptParser(file);
-			if(script.getConvoMap().size() > 0) {
-				scriptMap.put(script, file);
-				fileListModel.addElement(script.toString());
-			}
+			fileListModel.addElement(spAdapter.addFile(file));
 		}
+		fileList.clearSelection();
 		fileList.setSelectedIndex(0);
 	}
 	

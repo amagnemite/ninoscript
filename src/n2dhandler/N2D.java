@@ -55,6 +55,10 @@ public class N2D {
 		inputStream.read(buffer.array());
 		inputStream.close();
 		
+		if(buffer.getInt() != 0x4B43504E) { //NPCK
+			return;
+		}
+		
 		buffer.position(8);
 		int fileCount = buffer.getInt();
 		

@@ -14,15 +14,19 @@ import java.util.Map.Entry;
 import java.util.Set;
 import java.util.TreeMap;
 
+import ninoscript.DatParser.DatType;
+
 public class ItemLinkInfoDataAdapter extends DataAdapter {
+	//deals with both files at once instead of one file at a time unlike the other two
 	private Map<String, String> strings = new LinkedHashMap<String, String>(); //old string, new string
 	private Map<String, File> loadedFiles = new HashMap<String, File>();
 	private Map<String, ItemLinkInfoParser> parsers = new HashMap<String, ItemLinkInfoParser>();
 	
 	private String currentOldString = null;
 	
-	public void addFile(File file, String fileName) {
+	public void addFile(File file) {
 		//TODO: add a way to reload files and reset their keyvals
+		String fileName = file.getName();
 		if(!loadedFiles.containsKey(fileName)) {
 			loadedFiles.put(fileName, file);
 			
@@ -36,35 +40,13 @@ public class ItemLinkInfoDataAdapter extends DataAdapter {
 			}			
 		}
 	}
-	
-	@Override
-	public Map<ScriptParser, File> getScriptMap() {
-		// TODO Auto-generated method stub
-		return null;
-	}
-
-	public List<String> generateIDList() {
-		return new ArrayList<String>(Arrays.asList("0"));
-	}
 
 	public void resetCurrentData() {
 		for(String string : strings.keySet()) {
 			strings.put(string, string);
 		}
 	}
-
-	@Override
-	public ScriptParser getCurrentScript() {
-		// TODO Auto-generated method stub
-		return null;
-	}
-
-	@Override
-	public void setCurrentScript(ScriptParser sp) {
-		// TODO Auto-generated method stub
-
-	}
-
+	
 	public int getMaxBlocks() {
 		return strings.size() - 1;
 	}
@@ -90,7 +72,7 @@ public class ItemLinkInfoDataAdapter extends DataAdapter {
 				try {
 					stringBytes = newString.getBytes("Shift-JIS");
 					//prevent writes that are too long or pads as necessary
-					stringBytes = Arrays.copyOf(stringBytes, ItemLinkInfoParser.TEXTLENGTH);
+					stringBytes = Arrays.copyOf(stringBytes, DatType.ITEMLINKINFO.entryLength());
 				}
 				catch (UnsupportedEncodingException e) {
 				}
@@ -123,7 +105,7 @@ public class ItemLinkInfoDataAdapter extends DataAdapter {
 		loadedFiles.clear();
 		parsers.clear();
 		for(Entry<String, File> entry : reloadMap.entrySet()) {
-			addFile(entry.getValue(), entry.getKey());
+			addFile(entry.getValue());
 		}
 	}
 

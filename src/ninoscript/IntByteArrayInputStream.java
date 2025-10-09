@@ -3,14 +3,19 @@ package ninoscript;
 import java.io.ByteArrayInputStream;
 
 public class IntByteArrayInputStream extends ByteArrayInputStream {
-	public IntByteArrayInputStream (byte[] buffer) {
+	public IntByteArrayInputStream(byte[] buffer) {
 		super(buffer);
+	}
+	
+	public IntByteArrayInputStream(byte[] buffer, int offset, int length) {
+		super(buffer, offset, length);
 	}
 	
 	public int readU8() {
 		return read() & 0xFF;
 	}
 	
+	//-1 if end of stream
 	public int readU16() {
 		byte[] bytes = new byte[2];
 		int readBytes = read(bytes, 0, 2);

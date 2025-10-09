@@ -11,14 +11,15 @@ import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-public class ItemLinkInfoParser {
-	public static final int TEXTLENGTH = 81;
-	private int lineCount = 0;
+//handled separate from other dats in order to combine the strings together
+public class ItemLinkInfoParser extends DatParser {
 	private Map<String, ArrayList<Integer>> stringMap = new LinkedHashMap<String, ArrayList<Integer>>();
 	
 	public ItemLinkInfoParser(File file) {
 		byte[] fullFileBytes;
 		int fileSize;
+		type = DatType.ITEMLINKINFO;
+		int textLength = type.entryLength();
 		
 		try {
 			FileInputStream input = new FileInputStream(file);
@@ -26,6 +27,7 @@ public class ItemLinkInfoParser {
 			fullFileBytes = new byte[fileSize];
 			input.read(fullFileBytes);
 			input.close();
+			entryCount = fileSize / textLength;
 		} 
 		catch (FileNotFoundException e) {
 			return;
@@ -34,9 +36,11 @@ public class ItemLinkInfoParser {
 			return;
 		}
 		
-		byte[] line = new byte[TEXTLENGTH];
-		for(int i = 0; i < fileSize; i += TEXTLENGTH) {
-			line = Arrays.copyOfRange(fullFileBytes, i, i + TEXTLENGTH);
+		originalFile = file;
+		
+		byte[] line = new byte[textLength];
+		for(int i = 0; i < entryCount; i++) {
+			line = Arrays.copyOfRange(fullFileBytes, i, i + textLength);
 			String string = "";
 			try {
 				string = new String(line, "Shift-JIS");
@@ -50,8 +54,7 @@ public class ItemLinkInfoParser {
 			if(!stringMap.containsKey(string)) {
 				stringMap.put(string, new ArrayList<Integer>());
 			}
-			stringMap.get(string).add(lineCount);
-			lineCount++;
+			stringMap.get(string).add(i);
 		}
 	}
 	

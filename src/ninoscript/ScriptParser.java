@@ -5,8 +5,6 @@ import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -39,11 +37,11 @@ public class ScriptParser {
 		}
 	}
 	
-	private static final int EVENTSTATEBLOCK = 1;
-	private static final int MAPENTITYBLOCK = 5;
+	private static final int EVENTSTATESECTIONINDEX = 1;
+	private static final int MAPENTITYSECTIONINDEX = 5;
 	
 	private static final int INTERNALSCRIPTNAMEOFFSET = 8;
-	private static final int BLOCKS = 8;
+	private static final int SECTION = 8;
 	//private static final int VISUALBLOCKS = 8; //blocks 0-7 of section 5 seem to be visual related
 	private static final int SINGLECONVOID = 0;
 	private static final Set<Integer> TWOBYTETEXTTYPES = new TreeSet<Integer>(Arrays.asList(0x5, 0x11, 0x26, 0x29, 0x31));
@@ -58,17 +56,17 @@ public class ScriptParser {
 	//only keep track of the first block that contains a reused string, since we can just cross reference in the stringlistmap
 	private Map<String, ConvoSubBlockData> stringFirstBlockOccurranceMap = new HashMap<String, ConvoSubBlockData>();
 	
-	private Map<String, List<ConvoSubBlockData>> stringListMap = new HashMap<String, List<ConvoSubBlockData>>();	
+	private Map<String, List<ConvoSubBlockData>> stringListMap = new HashMap<String, List<ConvoSubBlockData>>();
+	private File originalFile;
 	
 	//TODO: make a separate constructor for single convo files
 	
 	public ScriptParser(File file) {
 		int scriptNameLength = 0;
 		byte[] nameBytes = null;
-		ConvoSubBlockData data;
-		ByteBuffer sectionOne = null;
-		ByteBuffer sectionFive = null;
-		ByteBuffer sectionSeven = null;
+		IntByteArrayInputStream eventStateSectionBuffer = null;
+		IntByteArrayInputStream mapEntitySectionBuffer = null;
+		IntByteArrayInputStream convoSectionBuffer = null;
 		Map<Integer, List<Integer>> connectedIDs = new HashMap<Integer, List<Integer>>();
 		
 		final int UNKNOWNTWOBYTETYPE = 0x1F;
@@ -112,10 +110,12 @@ public class ScriptParser {
 			return;
 		}
 		
+		originalFile = file;
 		fileName = file.getName();
 		
 		int offset = !isSingleConvo ? 4 : 0;
-		if(!isSingleConvo) { //parse section zero
+		if(!isSingleConvo) {
+			//parse section zero
 			scriptNameLength = fullFileBytes[INTERNALSCRIPTNAMEOFFSET] & 0xFF;
 			nameBytes = Arrays.copyOfRange(fullFileBytes, INTERNALSCRIPTNAMEOFFSET + 1, INTERNALSCRIPTNAMEOFFSET + scriptNameLength + 1);
 			
@@ -125,163 +125,161 @@ public class ScriptParser {
 			catch (UnsupportedEncodingException e) {
 			}
 			
-			for(int j = 0; j < BLOCKS - 1; j++) { //4 after initial magic
+			for(int j = 0; j < SECTION - 1; j++) { //4 after initial magic
 				int length = (fullFileBytes[offset] & 0xFF) | (fullFileBytes[offset + 1] & 0xFF) << 8 |
 						(fullFileBytes[offset + 2] & 0xFF) << 16 | (fullFileBytes[offset + 3] & 0xFF) << 24;
+				offset += 4;
 				
-				if(j == EVENTSTATEBLOCK) {
-					sectionOne = ByteBuffer.allocate(length);
-					sectionOne.order(ByteOrder.LITTLE_ENDIAN);
-					sectionOne.put(fullFileBytes, offset + 4, length);
-					sectionOne.position(0); //pos gets incremented after puts
+				if(j == EVENTSTATESECTIONINDEX) {
+					eventStateSectionBuffer = new IntByteArrayInputStream(fullFileBytes, offset, length);
 				}
-				else if(j == MAPENTITYBLOCK) {
-					sectionFive = ByteBuffer.allocate(length);
-					sectionFive.order(ByteOrder.LITTLE_ENDIAN);
-					sectionFive.put(fullFileBytes, offset + 4, length);
-					sectionFive.position(0); //pos gets incremented after puts
+				else if(j == MAPENTITYSECTIONINDEX) {
+					mapEntitySectionBuffer = new IntByteArrayInputStream(fullFileBytes, offset, length);
 				}
-				offset += 4 + length;
+				offset += length;
 			}
 		}
 		
 		//section 7/convo section doesn't have an overall length
-		sectionSeven = ByteBuffer.allocate(fullFileBytes.length - offset);
-		sectionSeven.order(ByteOrder.LITTLE_ENDIAN);
-		sectionSeven.put(fullFileBytes, offset, fullFileBytes.length - offset);
+		convoSectionBuffer = new IntByteArrayInputStream(fullFileBytes, offset, fullFileBytes.length - offset);
 			
 		//TODO: check to make sure all (non single convo) scripts can have a 5/7
 		
 		if(!isSingleConvo) {
 			int flag;
-			int structCount = sectionOne.get() & 0xFF;
+			int structCount = eventStateSectionBuffer.readU8();
 			
+			//section 1
 			for(int i = 0; i < structCount; i++) {
-				sectionOne.position(sectionOne.position() + 2); //length and id
-				flag = sectionOne.get() & 0xFF;
+				eventStateSectionBuffer.skip(2); //length and id
+				flag = eventStateSectionBuffer.readU8();
 				if(flag != 0) {
 					if(hasFlag(flag, SECTIONONEFLAG1)) {
-						int val = sectionOne.get() & 0xFF;
+						int val = eventStateSectionBuffer.readU8();
 						if(val == 0) {
-							int stringLength = sectionOne.get() & 0xFF;
-							sectionOne.position(sectionOne.position() + stringLength);
-							sectionOne.position(sectionOne.position() + 1);
+							int stringLength = eventStateSectionBuffer.readU8();
+							eventStateSectionBuffer.skip(stringLength);
+							eventStateSectionBuffer.skip(1);
 						}
 					}
 					if(hasFlag(flag, SECTIONONEFLAG2)) {
-						int arrayLength = sectionOne.get() & 0xFF;
-						sectionOne.position(sectionOne.position() + arrayLength);
-						int val = sectionOne.get() & 0xFF;
+						int arrayLength = eventStateSectionBuffer.readU8();;
+						eventStateSectionBuffer.skip(arrayLength);
+						int val = eventStateSectionBuffer.readU8();
 						if((hasFlag(val, SECTIONONEFLAG3))) {
-							sectionOne.position(sectionOne.position() + 1);
+							eventStateSectionBuffer.skip(1);
 						}
 						if((hasFlag(val, SECTIONONEFLAG4))) {
-							sectionOne.position(sectionOne.position() + 2);
+							eventStateSectionBuffer.skip(2);
 						}
 						if((hasFlag(val, SECTIONONEFLAG5))) {
-							sectionOne.position(sectionOne.position() + 2);
+							eventStateSectionBuffer.skip(2);
 						}
 					}
 				}
-				sectionOne.position(sectionOne.position() + SECTIONONEPRECONVOCOUNT);
+				eventStateSectionBuffer.skip(SECTIONONEPRECONVOCOUNT);
 				//System.out.println("section one convo ids");
-				getConvoIDs(sectionOne);
+				getConvoIDs(eventStateSectionBuffer);
 				//System.out.println("");
 			}
 			
-			int countByte = sectionFive.get() & 0xFF;
-		
-			for(int j = 0; j < countByte; j++) { //section zero
-				getSubFuncOneLength(sectionFive);
-				sectionFive.position(sectionFive.position() + BLOCKZEROLENGTH);
+			int countByte = mapEntitySectionBuffer.readU8();
+			
+			//section 5, block 0
+			for(int j = 0; j < countByte; j++) {
+				getSubFuncOneLength(mapEntitySectionBuffer);
+				mapEntitySectionBuffer.skip(BLOCKZEROLENGTH);
 			}
-				
-			countByte = sectionFive.get() & 0xFF;
+			
+			//section 5, npcs / block 1
+			countByte = mapEntitySectionBuffer.readU8();
 			for(int j = 0; j < countByte; j++) { //section one, npcs
-				//gets read again in func but need to ref here, so don't increment pos	
-				int firstByte = sectionFive.get(sectionFive.position()) & 0xFF;
-				getSubFuncOneLength(sectionFive);
-				sectionFive.position(sectionFive.position() + BLOCKONEPRECONVOLENGTH);		
-				getMultipleArrayLength(sectionFive, BLOCKONESTRINGCOUNT);			
-				getConvoIDs(sectionFive);
-				sectionFive.position(sectionFive.position() + BLOCKONEPOSTCONVOLENGTH);
+				int firstByte = getSubFuncOneLength(mapEntitySectionBuffer);
+				mapEntitySectionBuffer.skip(BLOCKONEPRECONVOLENGTH);		
+				getMultipleArrayLength(mapEntitySectionBuffer, BLOCKONESTRINGCOUNT);			
+				getConvoIDs(mapEntitySectionBuffer);
+				mapEntitySectionBuffer.skip(BLOCKONEPOSTCONVOLENGTH);
 				
-				flag = sectionFive.getInt();
+				flag = mapEntitySectionBuffer.readU32();
 				if(hasFlag(flag, 1 << 10)) {
-					int loopCount = sectionFive.get() & 0xFF;
-					getMultipleArrayLength(sectionFive, loopCount);
+					int loopCount = mapEntitySectionBuffer.readU8();
+					getMultipleArrayLength(mapEntitySectionBuffer, loopCount);
 					if(hasFlag(flag, 1 << 11)) {
-						sectionFive.position(sectionFive.position() + 1);
+						mapEntitySectionBuffer.skip(1);
 					}
 				}
 				if(hasFlag(flag, 1 << 14)) {
-					sectionFive.position(sectionFive.position() + 6);
+					mapEntitySectionBuffer.skip(6);
 				}
 				if(hasFlag(flag, 1 << 3)) {
-					sectionFive.position(sectionFive.position() + 8);
+					mapEntitySectionBuffer.skip(8);
 				}
 				if(hasFlag(flag, 1 << 15)) {
-					sectionFive.position(sectionFive.position() + 4);
+					mapEntitySectionBuffer.skip(4);
 				}
 				if(hasFlag(flag, 1 << 5)) {
-					getArrayLength(sectionFive);
+					skipArrayLength(mapEntitySectionBuffer);
 				}
 				if(hasFlag(flag, 1 << 8)) {
-					sectionFive.position(sectionFive.position() + 1);
+					mapEntitySectionBuffer.skip(1);
 				}
 				if(hasFlag(flag, 1 << 9)) {
-					sectionFive.position(sectionFive.position() + 4);
+					mapEntitySectionBuffer.skip(4);
 				}
 				if(hasFlag(flag, 1 << 16)) {
-					sectionFive.position(sectionFive.position() + 1);
+					mapEntitySectionBuffer.skip(1);
 				}
 				if(firstByte == 1) {
-					sectionFive.position(sectionFive.position() + 28);
+					mapEntitySectionBuffer.skip(28);
 				}
 			}
 			
-			countByte = sectionFive.get() & 0xFF;
-			for(int j = 0; j < countByte; j++) { //section two, map props/other entities
-				parseSubsectionTwo(sectionFive);
+			//section five, map props/other entities / block 2
+			countByte = mapEntitySectionBuffer.readU8();
+			for(int j = 0; j < countByte; j++) { 
+				parseMapEntities(mapEntitySectionBuffer);
 			}
 			
-			countByte = sectionFive.get() & 0xFF;
-			for(int j = 0; j < countByte; j++) { //section three, adjacent scripts
-				getSubFuncTwoLength(sectionFive);
-				getArrayLength(sectionFive);
-				sectionFive.position(sectionFive.position() + 1);
-				flag = sectionFive.get() & 0xFF;
+			//section five, adjacent scripts / block 3
+			countByte = mapEntitySectionBuffer.readU8();
+			for(int j = 0; j < countByte; j++) {
+				getSubFuncTwoLength(mapEntitySectionBuffer);
+				skipArrayLength(mapEntitySectionBuffer);
+				mapEntitySectionBuffer.skip(1);
+				flag = mapEntitySectionBuffer.readU8();
 				if(hasFlag(flag, 1 << 3)) {
-					sectionFive.position(sectionFive.position() + 1);
+					mapEntitySectionBuffer.skip(1);
 				}
-				getSubFuncThreeLength(sectionFive);
+				getSubFuncThreeLength(mapEntitySectionBuffer);
 			}
 			
-			countByte = sectionFive.get() & 0xFF;
-			for(int j = 0; j < countByte; j++) { //section four
-				getSubFuncTwoLength(sectionFive);
-				getConvoIDs(sectionFive);
-				sectionFive.position(sectionFive.position() + 2);
-				getSubFuncThreeLength(sectionFive);
+			//section five, block 4
+			countByte = mapEntitySectionBuffer.readU8();
+			for(int j = 0; j < countByte; j++) {
+				getSubFuncTwoLength(mapEntitySectionBuffer);
+				getConvoIDs(mapEntitySectionBuffer);
+				mapEntitySectionBuffer.skip(2);
+				getSubFuncThreeLength(mapEntitySectionBuffer);
 			}
 			
-			
-			countByte = sectionFive.get() & 0xFF;
-			for(int j = 0; j < countByte; j++) { //section five
-				getSubFuncTwoLength(sectionFive);
-				sectionFive.position(sectionFive.position() + 2);
-				getSubFuncThreeLength(sectionFive);
-				flag = sectionFive.getShort();
+			//section five, block 5
+			countByte = mapEntitySectionBuffer.readU8();
+			for(int j = 0; j < countByte; j++) {
+				getSubFuncTwoLength(mapEntitySectionBuffer);
+				mapEntitySectionBuffer.skip(2);
+				getSubFuncThreeLength(mapEntitySectionBuffer);
+				flag = mapEntitySectionBuffer.readU16();
 				if(hasFlag(flag, SECTIONFIVEFLAG1)) {
-					sectionFive.position(sectionFive.position() + 2);
+					mapEntitySectionBuffer.skip(2);
 				}
 				if(hasFlag(flag, SECTIONFIVEFLAG2)) {
-					sectionFive.position(sectionFive.position() + 2);
+					mapEntitySectionBuffer.skip(2);
 				}
 			}
 			
-			countByte = sectionFive.get() & 0xFF;
-			for(int j = 0; j < countByte; j++) { //section six
+			//section five, block 6
+			countByte = mapEntitySectionBuffer.readU8();
+			for(int j = 0; j < countByte; j++) {
 				System.out.println(fileName + " has subsection 7 of block 5");
 				//note 7 uses 2 count bytes
 			}	
@@ -290,79 +288,81 @@ public class ScriptParser {
 			usedConvoIDs.add(SINGLECONVOID);
 		}
 		
-		sectionSeven.position(0);
-		int definitionIndex = 0; //convos as they're ordered in the script, not their id
-		int convoID = !isSingleConvo ? sectionSeven.getInt() : SINGLECONVOID;
+		int definitionIndex = 0; //convos as they're defined in the script, not their id
+		int convoID = !isSingleConvo ? convoSectionBuffer.readU32() : SINGLECONVOID;
+		//offset is pointing to the start of the convo section
 		
 		while(convoID != -1) {
 			List<ConvoSubBlockData> blockList = new ArrayList<ConvoSubBlockData>();
-			int startPos = sectionSeven.position();
-			int convoLength = !isSingleConvo ? sectionSeven.getInt() : fullFileBytes.length - 4;
-			int finalPos = sectionSeven.position() + convoLength;
+			int specificConvoStartPos = offset; //including the id
+			int convoLength = !isSingleConvo ? convoSectionBuffer.readU32(): fullFileBytes.length - 4;
+			offset = !isSingleConvo ? offset + 8 : offset; //id + length
+			int specificConvoEndPos = offset + convoLength;
 			
 			if(convoLength == 0) { //apparently there's null convo blocks?
-				convoID = sectionSeven.getInt();
+				convoID = convoSectionBuffer.readU32();
 				continue;
 			}
-			sectionSeven.position(sectionSeven.position() + 4); //magic 0A 09 19 00
+			convoSectionBuffer.skip(4); //magic 0A 09 19 00
+			offset += 4;
 			
-			while(sectionSeven.position() < finalPos) {
-				int subBlockType = sectionSeven.get() & 0xFF;
+			while(offset < specificConvoEndPos) {
+				int subBlockType = convoSectionBuffer.readU8();
+				offset++;
 				
 				if(!TWOBYTETEXTTYPES.contains(subBlockType)) {
 					if(subBlockType == UNKNOWNTWOBYTETYPE) { //doesn't seem to contain strings, but it has a 2 byte length
-						sectionSeven.position(sectionSeven.getShort() + sectionSeven.position());
+						int unknownLength = convoSectionBuffer.readU16();
+						convoSectionBuffer.skip(unknownLength);
+						offset += 2 + unknownLength;
 						continue;
 					}
 					else if(subBlockType == CONDITIONALCONVOTYPE) {
 						if(!connectedIDs.containsKey(convoID)) {
 							connectedIDs.put(convoID, new ArrayList<Integer>());
 						}
-						sectionSeven.position(sectionSeven.position() + 2); //length + fixed 1?
-						int chainedID = sectionSeven.getInt();
+						convoSectionBuffer.skip(2); //length + fixed 1?
+						int chainedID = convoSectionBuffer.readU32();
+						offset += 6;
 						//System.out.println("0x21 " + chainedID);
 						connectedIDs.get(convoID).add(chainedID);
+						continue;
 					}
 					else {
-						int len = sectionSeven.get() & 0xFF;
-						sectionSeven.position(sectionSeven.position() + len);
+						int len = convoSectionBuffer.readU8();
+						convoSectionBuffer.skip(len);
+						offset += 1 + len;
 						continue;
 					}
 				}
 				
 				switch(subBlockType) {
 					case 0x05: //regular dialogue		
-						data = parseTextBlock(sectionSeven, offset);
-						blockList.add(data);
-						checkIfStringExists(data);
+						offset = parseTextBlock(convoSectionBuffer, offset, blockList);
 						break;
 					case 0x26: //non conversation text (sidequest prompts, etc)		
-						data = parseNonDialogue(sectionSeven, offset);
-						blockList.add(data);
-						checkIfStringExists(data);
+						offset = parseNonDialogue(convoSectionBuffer, offset, blockList);
 						break;
 					case 0x31: //text entry puzzle				
-						data = parseTextEntry(sectionSeven, offset);
-						if(data != null) { //at least one instance where no data?
-							blockList.add(data);
-						}
+						offset = parseTextEntry(convoSectionBuffer, offset, blockList);
 						break;
 					case 0x29:
 						//TODO: research this
 						System.out.println(fileName + " " + convoID + " has 0x29 sub");
-						sectionSeven.position(sectionSeven.position() + sectionSeven.getShort());
+						int len = convoSectionBuffer.readU16();
+						convoSectionBuffer.skip(len);
+						offset += 2 + len;
 						break;
 					case 0x11: //dialogue options
-						data = parseMultipleChoiceOptions(sectionSeven, offset);
-						blockList.add(data);
+						offset = parseMultipleChoiceOptions(convoSectionBuffer, offset, blockList);
 						break;
 				}
 			}
 			if(blockList.size() > 0) {
-				convoMap.put(definitionIndex, new Conversation(convoID, offset + startPos, convoLength, blockList));
+				convoMap.put(definitionIndex, new Conversation(convoID, specificConvoStartPos, convoLength, blockList));
 				definitionIndex++;
 			}
-			convoID = !isSingleConvo ? sectionSeven.getInt() : -1;
+			convoID = !isSingleConvo ? convoSectionBuffer.readU32() : -1; //offset handled at top of loop
 		}
 		for(Conversation convo : convoMap.values()) {
 			if(usedConvoIDs.contains(convo.getId()) && connectedIDs.containsKey(convo.getId())) {
@@ -387,15 +387,18 @@ public class ScriptParser {
 		}
 	}
 	
-	private void getArrayLength(ByteBuffer buffer) {
-		int length = buffer.get() & 0xFF;
-		buffer.position(buffer.position() + length);
+	private int skipArrayLength(IntByteArrayInputStream stream) {
+		int length = stream.readU8();
+		stream.skip(length);
+		return 1 + length;
 	}
 	
-	private void getMultipleArrayLength(ByteBuffer buffer, int loopCount) {
+	private int getMultipleArrayLength(IntByteArrayInputStream stream, int loopCount) {
+		int bytesRead = 0;
 		for(int l = 0; l < loopCount; l++) {
-			getArrayLength(buffer);
+			bytesRead += skipArrayLength(stream);
 		}
+		return bytesRead;
 	}
 	
 	private boolean hasFlag(int flag, int value) {
@@ -405,92 +408,93 @@ public class ScriptParser {
 		return false;
 	}
 	
-	private void getSubFuncOneLength(ByteBuffer buffer) {
+	private int getSubFuncOneLength(IntByteArrayInputStream stream) {
 		final int FIXEDBYTES = 14;
-		buffer.position(buffer.position() + 1); //firstByte
+		int firstByte = stream.readU8(); //firstByte
+
+		getSubFuncTwoLength(stream);
 		
-		getSubFuncTwoLength(buffer);
-		
-		buffer.position(buffer.position() + FIXEDBYTES);
+		stream.skip(FIXEDBYTES);
+		return firstByte;
 	}
 	
-	private void getSubFuncTwoLength(ByteBuffer buffer) { //some structs call this directly
+	private void getSubFuncTwoLength(IntByteArrayInputStream stream) { //some structs call this directly
 		final int UNKNOWNFLAG1 = 0x3C;
 		final int UNKNOWNFLAG2 = 0x3;
 		
-		int flagVal = buffer.get() & 0xFF;
+		int flagVal = stream.readU8();
 		int loopCount = 0;
 		
 		if(!hasFlag(flagVal, UNKNOWNFLAG1)) {
 			if(hasFlag(flagVal, UNKNOWNFLAG2)) {
-				loopCount = buffer.get() & 0xFF;
-				buffer.position(buffer.position() + loopCount * 8); //read 8 bytes per loop
+				loopCount = stream.readU8();
+				stream.skip(loopCount * 8); //read 8 bytes per loop
 			}
 		}
 		else {
-			loopCount = buffer.get() & 0xFF;
-			getMultipleArrayLength(buffer, loopCount); //read u8 length + array[length] per loop
+			loopCount = stream.readU8();
+			getMultipleArrayLength(stream, loopCount); //read u8 length + array[length] per loop
 		}
 	}
 	
-	private void getSubFuncThreeLength(ByteBuffer buffer) {
+	private void getSubFuncThreeLength(IntByteArrayInputStream stream) {
 		final int CASETWOBYTES = 24;
 		final int CASEONEBYTES = 16;
 		final int CASETHREEBYTES = 12;
 		final int CASEFOURBYTES = 28;
 		
-		buffer.position(buffer.position() + 1);
-		int switchVal = buffer.get() & 0xFF;
+		stream.skip(1);
+		int switchVal = stream.readU8();
 		switch(switchVal) {
 			case 0:
 			case 2:
-				buffer.position(buffer.position() + CASETWOBYTES);
+				stream.skip(CASETWOBYTES);
 				break;
 			case 1:
-				buffer.position(buffer.position() + CASEONEBYTES);
+				stream.skip(CASEONEBYTES);
 				break;
 			case 3:
-				int loopCount = buffer.get() & 0xFF;
-				buffer.position(buffer.position() + CASETHREEBYTES * (loopCount / 3));
+				int loopCount = stream.readU8();
+				stream.skip(CASETHREEBYTES * (loopCount / 3));
 				break;
 			case 4:
-				buffer.position(buffer.position() + CASEFOURBYTES);
+				stream.skip(CASEFOURBYTES);
 				break;
 		}
 	}
 	
-	private void getSubFuncFourLength(ByteBuffer buffer) {
+	private void getSubFuncFourLength(IntByteArrayInputStream stream) {
 		final int UNKNOWNFLAG1 = 0x81;
 		final int UNKNOWNFLAG2 = 1 << 1;
 		final int UNKNOWNFLAG3 = 1 << 2;
 		final int UNKNOWNFLAG4 = 0x40;
 		
-		buffer.position(buffer.position() + 4);
-		int flag = buffer.get() & 0xFF;
+		stream.skip(4);
+		int flag = stream.readU8();
 		if(hasFlag(flag, UNKNOWNFLAG1) && hasFlag(flag, UNKNOWNFLAG2)) {
-			getArrayLength(buffer);
+			skipArrayLength(stream);
 			if(hasFlag(flag, UNKNOWNFLAG3)) {
-				buffer.position(buffer.position() + 1);
+				stream.skip(1);
 			}
 		}
 		if(hasFlag(flag, UNKNOWNFLAG4)) {
-			buffer.position(buffer.position() + 1);
+			stream.skip(1);
 		}
 	}
 	
-	private void getConvoIDs(ByteBuffer buffer) {
+	private void getConvoIDs(IntByteArrayInputStream stream) {
 		final int EXTRADATABYTES = 12;
 		
-		int id = buffer.getInt();
+		int id = stream.readU32();
 		if(id != -1) {
 			//System.out.println("convo id: " + id);
 			usedConvoIDs.add(id);
 		}
 		
-		int loopCount = buffer.get() & 0xFF;
+		int loopCount = stream.readU8();
 		for(int j = 0; j < loopCount; j++) {
-			buffer.position(buffer.position() + EXTRADATABYTES);
-			id = buffer.getInt();
+			stream.skip(EXTRADATABYTES);
+			id = stream.readU32();
 			//System.out.println("extra id: " + id);
 			if(!usedConvoIDs.contains(id)) { //block one has some double defs?
 				usedConvoIDs.add(id);
@@ -498,7 +502,7 @@ public class ScriptParser {
 		}
 	}
 	
-	private void parseSubsectionTwo(ByteBuffer buffer) {
+	private void parseMapEntities(IntByteArrayInputStream stream) {
 		final int COMMONREAD = 2;
 		final int ZEROPOSTSTRING = 9;
 		final int ONEPOSTSTRING = 8;
@@ -524,172 +528,173 @@ public class ScriptParser {
 		final int FORTYFLAGFOUR = 1 << 0;
 		final int FORTYFLAGFIVE = 1 << 1;
 		
-		int firstByte = buffer.get(buffer.position()) & 0xFF;
 		int flag;
-		getSubFuncOneLength(buffer);
-		buffer.position(buffer.position() + COMMONREAD);
+		int firstByte = getSubFuncOneLength(stream);	
+		stream.skip(COMMONREAD);
 		
 		switch(firstByte) {
 			case 0:
-				getArrayLength(buffer);
-				buffer.position(buffer.position() + ZEROPOSTSTRING);
+				skipArrayLength(stream);
+				stream.skip(ZEROPOSTSTRING);
 				break;
 			case 1:
 			case 2:
-				getArrayLength(buffer);
-				buffer.position(buffer.position() + ONEPOSTSTRING);
+				skipArrayLength(stream);
+				stream.skip(ONEPOSTSTRING);
 				break;
 			case 3:
-				buffer.position(buffer.position() + 1);
-				getSubFuncFourLength(buffer);
-				buffer.position(buffer.position() + THREEPOSTFUNC);
-				getConvoIDs(buffer);
+				stream.skip(1);
+				getSubFuncFourLength(stream);
+				stream.skip(THREEPOSTFUNC);
+				getConvoIDs(stream);
 				break;
 			case 4:
-				buffer.position(buffer.position() + 1);
-				getSubFuncFourLength(buffer);
-				buffer.position(buffer.position() + FOURPOSTFUNC);
-				flag = buffer.get() & 0xFF;
+				stream.skip(1);
+				getSubFuncFourLength(stream);
+				stream.skip(FOURPOSTFUNC);
+				flag = stream.readU8();
 				if((flag & FOURFLAGONE) != 0) {
-					buffer.position(buffer.position() + 1);
+					stream.skip(1);
 				}
 				if((flag & FOURFLAGTWO) != 0) {
-					buffer.position(buffer.position() + 1);
+					stream.skip(1);
 				}
-				getConvoIDs(buffer);
+				getConvoIDs(stream);
 				break;
 			case 5:
-				getArrayLength(buffer);
-				buffer.position(buffer.position() + 4 + 4 + 1);
-				getArrayLength(buffer);
-				buffer.position(buffer.position() + 1);
+				skipArrayLength(stream);
+				stream.skip(4 + 4 + 1);
+				skipArrayLength(stream);
+				stream.skip(1);
 				break;
 			case 6:
-				getArrayLength(buffer);
-				buffer.position(buffer.position() + SIXPRECONVO);
-				getArrayLength(buffer);
-				buffer.position(buffer.position() + 1);
-				getConvoIDs(buffer);
-				flag = buffer.get() & 0xFF; 
+				skipArrayLength(stream);
+				stream.skip(SIXPRECONVO);
+				skipArrayLength(stream);
+				stream.skip(1);
+				getConvoIDs(stream);
+				flag = stream.readU8();
 				if(hasFlag(flag, SIXFLAGONE)) {
-					buffer.position(buffer.position() + 1);
+					stream.skip(1);
 				}
 				if(hasFlag(flag, SIXFLAGTWO)) {
-					buffer.position(buffer.position() + 1);
+					stream.skip(1);
 				}
 				break;
 			case 7:
 				System.out.println(fileName + " has section 2 subsection 7");
 				break;
 			case 8:
-				flag = buffer.get() & 0xFF;
-				getArrayLength(buffer); //string
+				flag = stream.readU8();
+				skipArrayLength(stream); //string
 				if(hasFlag(flag, 0x2)) {
-					getArrayLength(buffer); //string 2
+					skipArrayLength(stream); //string 2
 				}
 				break;
 			case 9:
-				buffer.position(buffer.position() + 2);
-				getConvoIDs(buffer);
+				stream.skip(2);
+				getConvoIDs(stream);
 				break;
 			case 0xA:
-				flag = buffer.get() & 0xFF;
+				flag = stream.readU8();
 				if((flag & AFLAGONE) != 0) {
-					buffer.position(buffer.position() + 2);
+					stream.skip(2);
 				}
 				if((flag & AFLAGTWO) != 0) {
-					buffer.position(buffer.position() + 2);
+					stream.skip(2);
 				}
 				break;
 			case 0xB:
-				buffer.position(buffer.position() + 1);
-				getSubFuncFourLength(buffer);
-				buffer.position(buffer.position() + 4); //2 2 byte
-				getConvoIDs(buffer);
+				stream.skip(1);
+				getSubFuncFourLength(stream);
+				stream.skip(4); //2 2 byte
+				getConvoIDs(stream);
 				break;
 			case 0xC:
-				buffer.position(buffer.position() + 2); //2 1 byte
-				getSubFuncFourLength(buffer);
-				buffer.position(buffer.position() + 4); //2 2 byte
-				getConvoIDs(buffer);
+				stream.skip(2); //2 1 byte
+				getSubFuncFourLength(stream);
+				stream.skip(4); //2 2 byte
+				getConvoIDs(stream);
 				break;
 			case 0xD:
-				buffer.position(buffer.position() + DPREFLAG);
-				flag = buffer.get() & 0xFF;
+				stream.skip(DPREFLAG);
+				flag = stream.readU8();
 				if(hasFlag(flag, DFLAG)) {
-					getMultipleArrayLength(buffer, buffer.get() & 0xFF);
+					getMultipleArrayLength(stream, stream.readU8());
 				}
 				break;
 			case 0xE:
-				buffer.position(buffer.position() + 4);
-				getArrayLength(buffer);
-				flag = buffer.getShort();
+				stream.skip(4);
+				skipArrayLength(stream);
+				flag = stream.readU16();
 				if(hasFlag(flag, 1 << 2)) {
-					buffer.position(buffer.position() + 1);
+					stream.skip(1);
 				}
 				if(hasFlag(flag, 1 << 3)) {
-					buffer.position(buffer.position() + 1);
+					stream.skip(1);
 				}
 				if(hasFlag(flag, 1 << 5)) {
-					buffer.position(buffer.position() + 2);
+					stream.skip(2);
 				}
 				if(hasFlag(flag, 1 << 6)) {
-					buffer.position(buffer.position() + 2);
+					stream.skip(2);
 				}
 				if(hasFlag(flag, 1 << 7)) {
-					buffer.position(buffer.position() + 2);
+					stream.skip(2);
 				}
 				if(hasFlag(flag, 1 << 9)) {
-					buffer.position(buffer.position() + 4);
+					stream.skip(4);
 				}
 				break;
 			case 0xF:
-				buffer.position(buffer.position() + FREAD);
+				stream.skip(FREAD);
 				break;
 			case 0x10:
 				System.out.println(fileName + " has section 2 subsection 0x10");
 				break;
 			case 0x11:
-				buffer.position(buffer.position() + ELEVENPRECONVO);
-				getConvoIDs(buffer);
+				stream.skip(ELEVENPRECONVO);
+				getConvoIDs(stream);
 				break;
 			case 0x12:
-				System.out.println(fileName + " has section 2 subsection 0x12");
+				stream.skip(1);
+				skipArrayLength(stream); //string name
+				stream.skip(2);
 				break;
 			case 0x13:
 				System.out.println(fileName + " has section 2 subsection 0x13");
 				break;
 			case 0x41:
-				getArrayLength(buffer);
-				getArrayLength(buffer);
-				getConvoIDs(buffer);
-				buffer.position(buffer.position() + FORTYONEPOSTCONVO);
+				skipArrayLength(stream);
+				skipArrayLength(stream);
+				getConvoIDs(stream);
+				stream.skip(FORTYONEPOSTCONVO);
 				break;
 			case 0x40:
-				getArrayLength(buffer);
-				getArrayLength(buffer);
-				getConvoIDs(buffer);
-				buffer.position(buffer.position() + FORTYPOSTCONVO);
-				flag = buffer.getShort();
+				skipArrayLength(stream);
+				skipArrayLength(stream);
+				getConvoIDs(stream);
+				stream.skip(FORTYPOSTCONVO);
+				flag = stream.readU16();
 				if((flag & FORTYFLAGONE) != 0) {
-					buffer.position(buffer.position() + 4);
+					stream.skip(4);
 				}
 				if((flag & FORTYFLAGTWO) != 0) {
-					getArrayLength(buffer);
+					skipArrayLength(stream);
 				}
 				if((flag & FORTYFLAGTHREE) != 0) {
-					buffer.position(buffer.position() + 1);
+					stream.skip(1);
 				}
-				flag = buffer.get() & 0xFF;
+				flag = stream.readU8();
 				if((flag & FORTYFLAGFOUR) != 0) {
-					buffer.position(buffer.position() + 4);
+					stream.skip(4);
 				}
 				if((flag & FORTYFLAGFIVE) != 0) {
-					buffer.position(buffer.position() + 4);
+					stream.skip(4);
 				}
 				break;
 			default:
-				System.out.println(fileName + " has unknown section 2 type " + firstByte);
+				System.out.println(fileName + " has unknown map entity type " + firstByte);
 		}
 	}
 	
@@ -717,7 +722,7 @@ public class ScriptParser {
 		}
 	}
 	
-	private ConvoSubBlockData parseTextBlock(ByteBuffer buffer, int fullOffset) {
+	private int parseTextBlock(IntByteArrayInputStream stream, int offset, List<ConvoSubBlockData> blockList) {
 		//TODO: may want to do something about char 0x1c, which the jpn ver seems to use and sometimes appears in scripts
 		final int SPRITEFLAG = 1 << 0;
 		final int UNKNOWNFLAG1 = (1 << 11) + (1 << 1);
@@ -734,129 +739,159 @@ public class ScriptParser {
 		final int UNKNOWNFLAG7 = 1 << 12;
 		final int UNKNOWNFLAG8 = 1 << 13;
 		
-		//should be pointing at the length already;
-		int start = buffer.position() - 1 + fullOffset;
+		//parsed type byte, should be pointing at the length already;
+		int start = offset - 1;
 		byte[] textBytes;
 		byte[] speakerBytes = null;
 		int speakerStart = -1;
 		int speakerDirectionByte = -1;
 		
-		int fullBlockLength = buffer.getShort();
-		int mysteryByte = buffer.get() & 0xFF;
+		int fullBlockLength = stream.readU16();
+		int mysteryByte = stream.readU8();
 		if(mysteryByte != 1) {
 			System.out.println(fileName + " has non one count? byte in text block");
 		}
+		offset += 3;
 		
-		int textStart = buffer.position() + fullOffset;
-		int textLength = buffer.getShort();
+		int textStart = offset;
+		int textLength = stream.readU16();
 		
 		textBytes = new byte[textLength];
-		buffer.get(textBytes);
+		stream.read(textBytes, 0, textLength);
+		offset += 2 + textLength;
 		
-		int flag = buffer.getInt();
+		int flag = stream.readU32();
+		offset += 4;
 	
 		if(hasFlag(flag, SPRITEFLAG)) {
-			int length = buffer.get() & 0xFF;
-			buffer.position(buffer.position() + length);
-			length = buffer.get() & 0xFF;
-			buffer.position(buffer.position() + length);
+			int length = stream.readU8();
+			stream.skip(length);
+			offset += 1 + length;
+			
+			length = stream.readU8();
+			stream.skip(length);
+			offset += 1 + length;
 		}
 		if(hasFlag(flag, UNKNOWNFLAG1)) {
-			buffer.position(buffer.position() + 4);
+			stream.skip(4);
+			offset += 4;
 			if(hasFlag(flag, UNKNOWNSUBFLAG1)) {
 				flag = flag & 0xFFFFFFFD;
 			}
 		}
 		if(hasFlag(flag, UNKNOWNFLAG2)) {
-			buffer.position(buffer.position() + 1);
+			stream.skip(1);
+			offset += 1;
 		}
 		if(hasFlag(flag, SPEAKERDIRECTIONFLAG)) {
-			speakerDirectionByte = buffer.get() & 0xFF;
+			speakerDirectionByte = stream.readU8();
+			offset += 1;
 		}
 		if(hasFlag(flag, UNKNOWNFLAG4)) {
-			buffer.position(buffer.position() + 1);
+			stream.skip(1);
+			offset += 1;
 		}
 		if(hasFlag(flag, UNKNOWNFLAG5)) {
-			buffer.position(buffer.position() + 2);
+			stream.skip(2);
+			offset += 2;
 		}
 		if(hasFlag(flag, SPEAKERNAMEFLAG)) {
-			speakerStart = buffer.position() + fullOffset;
-			int length = buffer.get() & 0xFF;
+			speakerStart = offset;
+			int length = stream.readU8();
 			speakerBytes = new byte[length];
-			buffer.get(speakerBytes);
+			stream.read(speakerBytes, 0, length);
+			offset += 1 + length;
 		}
 		if(hasFlag(flag, UNKNOWNFLAG6)) {
-			buffer.position(buffer.position() + 1);
+			stream.skip(1);
+			offset += 1;
 		}
 		if(hasFlag(flag, STRINGFLAG)) {
-			int count = buffer.get() & 0xFF;
+			int count = stream.readU8();
+			offset += 1;
 			for(int i = 0; i < count; i++) {
 				if(hasFlag(flag, UNKNOWNSUBFLAG2)) {
-					getArrayLength(buffer);
+					offset += skipArrayLength(stream);
 				}
-				buffer.position(buffer.position() + 2);
+				stream.skip(2);
+				offset += 2;
 			}
 			if(hasFlag(flag, UNKNOWNSUBFLAG3)) {
-				buffer.position(buffer.position() + 2 + 2);
+				stream.skip(2 + 2);
+				offset += 2 + 2;
 			}
 		}
 		if(hasFlag(flag, UNKNOWNFLAG7)) {
-			buffer.position(buffer.position() + 1);
+			stream.skip(1);
+			offset += 1;
 		}
 		if(hasFlag(flag, UNKNOWNFLAG8)) {
-			int count = buffer.get() & 0xFF;
-			buffer.position(buffer.position() + 4 * count);
+			int count = stream.readU8();
+			stream.skip(4 * count);
+			offset += 1 + 4 * count;
 		}
-	
-		return new ExtraStringConvoData(ConvoMagic.DIALOGUE, start, fullBlockLength, textStart, speakerStart,
+		
+		ExtraStringConvoData newBlock = new ExtraStringConvoData(ConvoMagic.DIALOGUE, start, fullBlockLength, textStart, speakerStart,
 				textBytes, speakerBytes, speakerDirectionByte);
+		
+		blockList.add(newBlock);
+		checkIfStringExists(newBlock);
+		return offset;
 	}
 	
-	private ConvoSubBlockData parseNonDialogue(ByteBuffer buffer, int fullOffset) {
+	private int parseNonDialogue(IntByteArrayInputStream stream, int offset, List<ConvoSubBlockData> blockList) {
 		int UNKNOWNFLAG1 = 0x3;
 		int UNKNOWNFLAG2 = 1 << 6;
 		int UNKNOWNFLAG3 = 1 << 7;
 		int UNKNOWNFLAG4 = 1 << 2;
 		
 		//starts at full length
-		int start = buffer.position() - 1 + fullOffset;
+		int start = offset - 1;
 		
-		int fullBlockLength = buffer.getShort();
-		int mysteryByte = buffer.get() & 0xFF;
+		int fullBlockLength = stream.readU16();
+		int mysteryByte = stream.readU8();
 		if(mysteryByte != 1) {
 			System.out.println(fileName + " has non one count? byte in nondialogue block");
 		}
-		//buffer.position(buffer.position() + 1); //skip the byte between lengths
-		int textStart = buffer.position() + fullOffset;
-		int textLength = buffer.get() & 0xFF;
+		offset += 3;
 		
+		int textStart = offset;
+		int textLength = stream.readU8();
 		byte[] textBytes = new byte[textLength];
-		buffer.get(textBytes);
+		stream.read(textBytes, 0, textLength);
+		offset += 1 + textLength;
 		
-		int flag = (buffer.get() & 0xFF) | 0xFF00;
+		int flag = stream.readU8() | 0xFF00;
+		offset++;
 		
 		if(hasFlag(flag, UNKNOWNFLAG1)) {
-			buffer.position(buffer.position() + 2);
-			getArrayLength(buffer); //sound effect string
+			stream.skip(2);
+			offset += 2;
+			offset += skipArrayLength(stream); //sound effect string
 			if(hasFlag(flag, UNKNOWNFLAG4)) {
-				buffer.position(buffer.position() + 2);
+				stream.skip(2);
+				offset += 2;
 			}
 		}
 		if(hasFlag(flag, UNKNOWNFLAG2)) {
-			buffer.position(buffer.position() + 2);
+			stream.skip(2);
+			offset += 2;
 		}
 		if(hasFlag(flag, UNKNOWNFLAG3)) {
-			buffer.position(buffer.position() + 1);
+			stream.skip(1);
+			offset += 1;
 		}
 		
-		return new ConvoSubBlockData(ConvoMagic.NONDIALOGUE, start, fullBlockLength, textStart, textBytes);
+		ConvoSubBlockData data = new ConvoSubBlockData(ConvoMagic.NONDIALOGUE, start, fullBlockLength, textStart, textBytes);
+		blockList.add(data);
+		checkIfStringExists(data);
+		
+		return offset;
 	}
 	
-	private ConvoSubBlockData parseTextEntry(ByteBuffer buffer, int fullOffset) {
+	private int parseTextEntry(IntByteArrayInputStream stream, int offset, List<ConvoSubBlockData> blockList) {
 		final int UNKNOWNFLAG = 1 << 0;
 		
-		int start = buffer.position() - 1 + fullOffset;
-		int fullBlockLength = buffer.getShort();
 		byte[] answerBytes;
 		byte[] descriptionBytes = null;
 		int answerLength = 0;
@@ -864,67 +899,87 @@ public class ScriptParser {
 		int descriptionLength = -1;
 		int descriptionStart = -1;
 		
+		int start = offset - 1;
+		int fullBlockLength = stream.readU16();
+		offset += 2;
+		
 		//TODO: may want some special handling for the japanese ver, which seems to use 0A for a formatting thing
-		int mysteryVal = buffer.get() & 0xFF; //generally 0x07, but
+		int mysteryVal = stream.readU8(); //generally 0x07, but
+		offset++;
 		if(mysteryVal != 0x07) {
 			System.out.println(Integer.toHexString(mysteryVal) + " text entry with " + fullBlockLength + " length");
 			if(fullBlockLength != 2) {
 				
 			}
-			buffer.position(buffer.position() + (fullBlockLength - 1));
-			return null;
+			stream.skip(fullBlockLength - 1);
+			offset += fullBlockLength - 1;
+			return offset;
 		}
 		
-		int flag = buffer.get() & 0xFF;
+		int flag = stream.readU8();
+		offset++;
 		if(hasFlag(flag, UNKNOWNFLAG)) {
-			int count = buffer.get() & 0xFF;
-			buffer.position(buffer.position() + count * 4);
+			int count = stream.readU8();
+			stream.skip(count * 4);
+			offset += 1 + count * 4;
 		}
 		
-		int stringCount = buffer.get() & 0xFF;
+		int stringCount = stream.readU8();
+		offset++;
 		
 		//some text entries only have the answer with a generic "enter the answer" prompt and no description
-		answerStart = buffer.position() + fullOffset;
-		answerLength = buffer.getShort();
+		answerStart = offset;
+		answerLength = stream.readU16();
 		answerBytes = new byte[answerLength];
-		buffer.get(answerBytes);
+		stream.read(answerBytes, 0, answerLength);
+		offset += 2 + answerLength;
 		
 		if(stringCount == 2) {
-			descriptionStart = buffer.position() + fullOffset;
-			descriptionLength = buffer.getShort();
+			descriptionStart = offset;
+			descriptionLength = stream.readU16();
 			descriptionBytes = new byte[descriptionLength];
-			buffer.get(descriptionBytes);
+			stream.read(descriptionBytes, 0, descriptionLength);
+			offset += 2 + descriptionLength;
 		}
 		if(stringCount > 2) {
 			System.out.println(fileName + " has text entry with 3+ strings");
 		}
 		
-		return new ExtraStringConvoData(ConvoMagic.TEXTENTRY, start, fullBlockLength, descriptionStart, answerStart, 
+		ExtraStringConvoData data = new ExtraStringConvoData(ConvoMagic.TEXTENTRY, start, fullBlockLength, descriptionStart, answerStart, 
 				descriptionBytes, answerBytes);
+		blockList.add(data);
+		
+		return offset;
 	}
 	
-	private MultipleChoiceConvoData parseMultipleChoiceOptions(ByteBuffer buffer, int fullOffset) {
+	private int parseMultipleChoiceOptions(IntByteArrayInputStream stream, int offset, List<ConvoSubBlockData> blockList) {
 		List<byte[]> answersBytes = new ArrayList<byte[]>();
 		
-		int start = buffer.position() - 1 + fullOffset;
-		int fullBlockLength = buffer.getShort();
-		buffer.position(buffer.position() + 1);
-		int count = buffer.get() & 0xFF;
-		int choicesStart = buffer.position() + fullOffset;
+		int start = offset - 1;
+		int fullBlockLength = stream.readU16();
+		stream.skip(1);
+		int count = stream.readU8();
+		offset += 4;
+		
+		int choicesStart = offset;
 		
 		if(count > 3) {
 			System.out.println(count + " multiple choice");
 		}
 		
 		for(int i = 0; i < count; i++) {
-			int answerLength = buffer.getShort();
+			int answerLength = stream.readU16();
 			byte[] array = new byte[answerLength];
-			buffer.get(array);
+			stream.read(array, 0, answerLength);
 			answersBytes.add(array);
+			offset += 2 + answerLength;
 		}
-		buffer.position(buffer.position() + 2);
+		stream.skip(2);
+		offset += 2;
 		
-		return new MultipleChoiceConvoData(ConvoMagic.MULTIPLECHOICE, start, fullBlockLength, choicesStart, answersBytes);
+		MultipleChoiceConvoData data = new MultipleChoiceConvoData(ConvoMagic.MULTIPLECHOICE, start, fullBlockLength, choicesStart, answersBytes);
+		blockList.add(data);
+		return offset;
 	}
 	
 	public String toString() {
@@ -945,5 +1000,9 @@ public class ScriptParser {
 	
 	public List<Integer> getUsedConvoIDs() {
 		return usedConvoIDs;
+	}
+	
+	public File getOriginalFile() {
+		return originalFile;
 	}
 }

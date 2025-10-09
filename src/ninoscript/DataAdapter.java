@@ -1,17 +1,14 @@
 package ninoscript;
 
 import java.io.File;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
-import java.util.Map;
 
 //bridge between data objects like scriptparser and regulartextpanel
 //stores the currently active string/s
 public abstract class DataAdapter {
-	public abstract Map<ScriptParser, File> getScriptMap();
-	public abstract List<String> generateIDList();
 	public abstract void resetCurrentData();
-	public abstract ScriptParser getCurrentScript();
-	public abstract void setCurrentScript(ScriptParser sp);
 	public abstract int getMaxBlocks();
 	public abstract void updateCurrentConvoBlock(int index);
 	public abstract void writeFile();
@@ -19,7 +16,11 @@ public abstract class DataAdapter {
 	public abstract String getNewMainString(String key);
 	public abstract void writeNewMainString(String newString);
 	
-	public void updateCurrentScript(int index) {
+	public List<String> generateIDList() {
+		return new ArrayList<String>(Arrays.asList("0"));
+	}
+	
+	public void updateCurrentScript(String string) {
 	}
 	
 	public Conversation getCurrentConversation() {

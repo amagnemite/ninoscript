@@ -19,10 +19,20 @@ import ninoscript.ScriptParser.ConvoMagic;
 
 //contains all of the files that are loaded and the relevant current data
 public class ScriptParserDataAdapter extends DataAdapter {
-	private Map<ScriptParser, File> scriptMap = new LinkedHashMap<ScriptParser, File>();
+	private Map<String, ScriptParser> scriptMap = new LinkedHashMap<String, ScriptParser>();
 	private ScriptParser currentScript = null;
 	private Conversation currentConvo;
 	private ConvoSubBlockData currentBlock;
+	
+	public String addFile(File file) {
+		ScriptParser script = new ScriptParser(file);
+		String string = script.toString();
+		
+		scriptMap.put(string, script); //will overwrite any existing instance
+		
+		currentScript = script;
+		return string;
+	}
 	
 	public List<String> generateIDList() {
 		List<String> list = new ArrayList<String>();
@@ -40,7 +50,7 @@ public class ScriptParserDataAdapter extends DataAdapter {
 		return list;
 	}
 	
-	public Map<ScriptParser, File> getScriptMap() {
+	public Map<String, ScriptParser> getScriptMap() {
 		return scriptMap;
 	}
 	
@@ -62,8 +72,8 @@ public class ScriptParserDataAdapter extends DataAdapter {
 		currentScript = sp;
 	}
 	
-	public void updateCurrentScript(int index) {
-		currentScript = (ScriptParser) scriptMap.keySet().toArray()[index];
+	public void updateCurrentScript(String string) {
+		currentScript = scriptMap.get(string);
 	}
 	
 	public int getMaxBlocks() {
@@ -142,7 +152,7 @@ public class ScriptParserDataAdapter extends DataAdapter {
 		final int SPEAKERBYTELENGTH = 1;
 		final byte[] CONVERSATIONMARKER = {0x0A, 0x09, 0x19, 0x00};
 		
-		File originalFile = scriptMap.get(currentScript);
+		File originalFile = currentScript.getOriginalFile();
 		File tempFile;
 		File backupFile = new File(originalFile.getAbsolutePath() + ".bak");
 		FileOutputStream fw;
@@ -163,19 +173,20 @@ public class ScriptParserDataAdapter extends DataAdapter {
 		
 			for(Conversation convo : currentScript.getConvoMap().values()) {
 				ByteArrayOutputStream convoStream = new ByteArrayOutputStream();
-				int convoHeaderExtraBytes = convo.getStartOffset() != 0 ? 8 : 4;
+				int headerLength = convo.getStartOffset() != 0 ? 12 : 4; //id + length + magic, or just magic for single convo
 				int convoLength = convo.getLength();
 				
-				//write any non text containing convos, skip convo length and magic
+				//write anything non text up to the id of this convo
+				//this writes everything else in the file for the first convo
 				fw.write(fullFileBytes, originalFileIndex, convo.getStartOffset() - originalFileIndex);
-				originalFileIndex += (convo.getStartOffset() + convoHeaderExtraBytes) - originalFileIndex;
+				originalFileIndex += (convo.getStartOffset() + headerLength) - originalFileIndex; //skip id + length + magic
 				
 				for(ConvoSubBlockData block : convo.getBlockList()) {
 					byte[] mainStringArray;
 					byte[] extraInfoArray = null;
 					ByteArrayOutputStream blockStream = new ByteArrayOutputStream();
 					ConvoMagic magic = block.getMagic();
-					int length = DIALOGUEBYTELENGTH;
+					int lengthSize = DIALOGUEBYTELENGTH;
 					int blockOffset = 0;
 					int firstTextStart = magic == ConvoMagic.TEXTENTRY ? ((ExtraStringConvoData) block).getExtraInfoStartOffset()
 							: block.getTextStartOffset();
@@ -193,17 +204,17 @@ public class ScriptParserDataAdapter extends DataAdapter {
 						
 						switch(magic) {
 							case NONDIALOGUE:
-								length = NONDIALOGUEBYTELENGTH;
+								lengthSize = NONDIALOGUEBYTELENGTH;
 							case DIALOGUE:				
 								mainStringArray = block.getNewTextString().getBytes("Shift-JIS");
-								if(length == NONDIALOGUEBYTELENGTH) {
+								if(lengthSize == NONDIALOGUEBYTELENGTH) {
 									blockStream.write(Integer.valueOf(mainStringArray.length).byteValue());
 								}
 								else {
 									blockStream.writeBytes(twoByteBuffer.putShort(0, (short) mainStringArray.length).array());
 								}
 								blockStream.writeBytes(mainStringArray);
-								blockOffset += block.getOldTextLength() + length;
+								blockOffset += block.getOldTextLength() + lengthSize;
 								
 								if(block.hasExtraString()) {
 									extraInfoArray = ((ExtraStringConvoData) block).getNewExtraInfoString().getBytes("Shift-JIS");
@@ -248,22 +259,24 @@ public class ScriptParserDataAdapter extends DataAdapter {
 						blockStream.write(fullFileBytes, blockOffset, blockLength - bytesRead);
 					}
 					
-					//should have all the bytes except for magic and the total blockLength
+					//should have all the bytes except for the block type and the total blockLength
 					convoStream.write(block.getMagic().getValue());
 					convoStream.writeBytes(twoByteBuffer.putShort(0, (short) blockStream.size()).array());
 					blockStream.writeTo(convoStream);
 					originalFileIndex += (blockLength + 3);
 				}
-				//the length of convo blocks does include the magic, unlike dialogue blocks
-				int bytesRead = originalFileIndex - (convo.getStartOffset() + convoHeaderExtraBytes);
-				if(bytesRead < convoLength) {
+				
+				int bytesRead = originalFileIndex - (convo.getStartOffset() + headerLength);
+				if(bytesRead < convoLength) { //write extra non text data
 					convoStream.write(fullFileBytes, originalFileIndex, convoLength - bytesRead);
-					originalFileIndex += convoLength - bytesRead;// + convoHeaderExtraBytes;
+					originalFileIndex += (convoLength - bytesRead);
 				}	
 				
-				//now should have everything but the convo magic and length in stream
+				//now should have everything but the convo header stream
 				if(convo.getStartOffset() != 0) {
-					fw.write(fourByteBuffer.putInt(0, convoStream.size()).array());
+					fw.write(fourByteBuffer.putInt(0, convo.getId()).array());
+					int totalSize = convoStream.size() + 4; //accounting for magic now
+					fw.write(fourByteBuffer.putInt(0, totalSize).array());
 					fw.write(CONVERSATIONMARKER);
 				}
 				else { //for one convo files
@@ -283,9 +296,8 @@ public class ScriptParserDataAdapter extends DataAdapter {
 			originalFile.renameTo(backupFile);
 			tempFile.renameTo(originalFile);
 			
-			scriptMap.remove(currentScript);
-			ScriptParser script = new ScriptParser(tempFile);
-			scriptMap.put(script, tempFile);
+			ScriptParser script = new ScriptParser(originalFile); //file objs are immutable and remain linked to the same path
+			scriptMap.put(currentScript.toString(), script);
 			currentScript = script;
 		}
 		catch (IOException e) {

@@ -2,9 +2,9 @@ package ninoscript;
 
 import java.util.List;
 
-public class Conversation {	
+public class Conversation {
+	private int startOffset; //offset of the id, 8 bytes before the magic
 	private int id;
-	private int startOffset; //this is the offset of the length, 4b before 0A 09 19 00
 	private int length;
 	private List<ConvoSubBlockData> blockList;
 	
@@ -24,7 +24,7 @@ public class Conversation {
 	}
 
 	public int getLength() {
-		return length;
+		return length - 4; //length without the magic included, so the actual data length
 	}
 
 	public void setLength(int length) {
