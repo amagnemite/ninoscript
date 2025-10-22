@@ -38,8 +38,8 @@ public class DatParserDataAdapter extends DataAdapter {
 		}
 	}
 	
-	public void setCurrentScript(int index) {
-		currentScript = datMap.get(index);
+	public void setCurrentScript(String string) {
+		currentScript = datMap.get(string);
 	}
 	
 	public int getMaxBlocks() {

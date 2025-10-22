@@ -5,26 +5,21 @@ import java.awt.Dimension;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
-import java.io.ByteArrayOutputStream;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.io.File;
 import java.io.FileInputStream;
-import java.io.FileNotFoundException;
-import java.io.FileOutputStream;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.PrintWriter;
-import java.io.UnsupportedEncodingException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
-import java.util.Set;
 
 import javax.swing.ButtonGroup;
 import javax.swing.DefaultComboBoxModel;
@@ -50,10 +45,8 @@ import javax.swing.SpinnerNumberModel;
 import javax.swing.UIManager;
 import javax.swing.filechooser.FileFilter;
 
-
 import n2dhandler.N2D;
 import n2dhandler.TileMaker;
-import ninoscript.ConvoSubBlockData.*;
 import ninoscript.DatParser.DatType;
 import ninoscript.ScriptParser.ConvoMagic;
 
@@ -77,6 +70,7 @@ public class MainWindow extends JFrame {
 	JMenuItem generateN2DImage = new JMenuItem("Generate images from .n2d");
 	JMenuItem tileMaker = new JMenuItem("Make tiles from images");
 	JMenuItem pngToBtx = new JMenuItem("Convert PNG to BTX");
+	JMenuItem btxToPng = new JMenuItem("Convert BTX to PNG");
 	
 	DefaultListModel<String> fileListModel = new DefaultListModel<String>();
 	SpinnerNumberModel blockSpinnerModel = new SpinnerNumberModel(0, 0, null, 1);
@@ -129,6 +123,7 @@ public class MainWindow extends JFrame {
 		utilitiesMenu.add(generateN2DImage);
 		utilitiesMenu.add(tileMaker);
 		utilitiesMenu.add(pngToBtx);
+		utilitiesMenu.add(btxToPng);
 		menuBar.add(utilitiesMenu);
 		setJMenuBar(menuBar);
 		
@@ -389,39 +384,94 @@ public class MainWindow extends JFrame {
 						buffer.read(textureBytes);
 						
 						BTX btx = new BTX(textureBytes);
-						btx.convertNewImage(png);
-						btx.write(btxToWrite, preTextureBytes);
+						btx.convertPNGToBTX(png);
+						btx.writeBTX(btxToWrite, preTextureBytes);
 					}
 					catch(IOException e) {
 						return;
 					}
+					break;
+			}
+		});
+		
+		btxToPng.addActionListener(event -> {
+			JFileChooser c = new JFileChooser();
+			c.setDialogTitle("Select a BTX file");
+			c.showOpenDialog(this);
+			File btxFile = c.getSelectedFile();
+			
+			if(btxFile == null) {
+				return;
+			}
+			
+			c.setFileFilter(new PNGFileFilter());
+			c.setDialogTitle("Select the file to write to");
+			c.showSaveDialog(this);
+			File png = c.getSelectedFile();
+			
+			Object[] options = {true, false};
+			/*
+			int format = (int) JOptionPane.showInputDialog(this, "format", "format", JOptionPane.PLAIN_MESSAGE, null, options, 4);
+			
+			options[0] = 0;
+			int palette = (int) JOptionPane.showInputDialog(this, "palette", "palette", JOptionPane.PLAIN_MESSAGE, null, options, 0);
+			*/
+			boolean useSubPalettes = (boolean) JOptionPane.showInputDialog(this, "format", "format", JOptionPane.PLAIN_MESSAGE, null, options, 4);
+			
+			//TODO: differentiate between bmd0/n3d/tmap
+			//also make this less redundant
+			
+			int magic;
+			byte[] byteBuffer = new byte[(int) btxFile.length()];
+			FileInputStream inStream;
+			IntByteArrayInputStream buffer = new IntByteArrayInputStream(byteBuffer);
+			try {
+				inStream = new FileInputStream(btxFile);
+				inStream.read(byteBuffer);
+				inStream.close();
+				
+				buffer.mark(-1);
+				magic = buffer.readU32();
+				
+				switch(magic) {
+					case 0x30444D42: //bmd0
+						buffer.skip(4);
+						int totalSize = buffer.readU32();
+						buffer.skip(8);
+						
+						int texOffset = buffer.readU32();
+						
+						buffer.reset();
+						byte[] textureBytes = new byte[totalSize - texOffset];
+						buffer.skip(texOffset);
+						buffer.read(textureBytes);
+						
+						BTX btx = new BTX(textureBytes);
+						
+						//TODO: move prompt here
+						
+						btx.convertBTXToPNG(useSubPalettes, png);
+						break;
+				}
+			}
+			catch(IOException e) {
+				return;
 			}
 		});
 		
 		fileList.addListSelectionListener(event -> {
-			int index = fileList.getSelectedIndex();
 			
-			if(index != -1) {
-				//might need a is this file still here check
-				switch(mode) {
-					case SCRIPTFILE:
-						currentAdapter.resetCurrentData();
-						currentAdapter.updateCurrentScript(fileList.getSelectedValue());
-						break;
-					case ITEMLINKINFO:
-						//do nothing since all the data is already loaded
-						break;
-					case GENERALDAT:
-						
-					default:
-						break;
+		});
+		
+		fileList.addMouseListener(new MouseAdapter() {
+			public void mousePressed(MouseEvent e) {
+				if(e.getClickCount() == 1) {
+					return;
 				}
-				
-				populateIDs(); //will force a combo action
+				if(e.getClickCount() == 2) {
+					loadDataFromList();
+				}
 			}
-			else {
-				clearComponents();
-			}	
 		});
 		
 		convoIdCombo.addActionListener(event -> {
@@ -516,6 +566,31 @@ public class MainWindow extends JFrame {
 		});
 	}
 	
+	private void loadDataFromList() {
+		int index = fileList.getSelectedIndex();
+		
+		if(index != -1) {
+			//might need a is this file still here check
+			switch(mode) {
+				case GENERALDAT:
+				case SCRIPTFILE:
+					currentAdapter.resetCurrentData();
+					currentAdapter.updateCurrentScript(fileList.getSelectedValue());
+					break;
+				case ITEMLINKINFO:
+					//do nothing since all the data is already loaded
+					break;
+				default:
+					break;
+			}
+			
+			populateIDs(); //will force a combo action
+		}
+		else {
+			clearComponents();
+		}
+	}
+	
 	private void populateIDs() {
 		updateComponents = false;
 		idComboModel.removeAllElements();
@@ -580,22 +655,20 @@ public class MainWindow extends JFrame {
 	
 	private void writeFile() {
 		saveText();
-		int index = fileListModel.indexOf(fileList.getSelectedIndex());
 		
 		currentAdapter.writeFile();
 		
-		reloadFile(index);
+		reloadFile();
 	}
 	
-	private void reloadFile(int index) {
-		index = index == -1 ? 0 : index;
+	private void reloadFile() {
+		String index = fileList.getSelectedValue();
 		
 		switch(mode) {
 			case SCRIPTFILE:
 			case GENERALDAT:
-				//fileListModel.set(index, spAdapter.getCurrentScript().toString());
 				fileList.clearSelection();
-				fileList.setSelectedIndex(index);
+				fileList.setSelectedValue(index, true);
 				break;
 			case ITEMLINKINFO:
 				//just reload the entire filelist
@@ -603,7 +676,8 @@ public class MainWindow extends JFrame {
 				fileListModel.addAll(ilAdapter.getLoadedFilenames());
 				fileList.setSelectedIndex(0);
 				break;
-		}		
+		}
+		loadDataFromList();
 	}
 	
 	private void loadFile(File file) { //dump old list, load one file
@@ -667,6 +741,7 @@ public class MainWindow extends JFrame {
 				fileListModel.addElement(newListItem);
 			}
 			fileList.setSelectedValue(newListItem, true);
+			loadDataFromList();
 		}
 	}
 	
@@ -681,6 +756,7 @@ public class MainWindow extends JFrame {
 		}
 		fileList.clearSelection();
 		fileList.setSelectedIndex(0);
+		loadDataFromList();
 	}
 	
 	private void findAllMatches(File dir) { //find all matching strings across all files

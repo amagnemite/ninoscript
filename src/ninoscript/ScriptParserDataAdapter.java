@@ -277,11 +277,8 @@ public class ScriptParserDataAdapter extends DataAdapter {
 					fw.write(fourByteBuffer.putInt(0, convo.getId()).array());
 					int totalSize = convoStream.size() + 4; //accounting for magic now
 					fw.write(fourByteBuffer.putInt(0, totalSize).array());
-					fw.write(CONVERSATIONMARKER);
 				}
-				else { //for one convo files
-					fw.write(CONVERSATIONMARKER);
-				}
+				fw.write(CONVERSATIONMARKER);
 				convoStream.writeTo(fw);
 			}
 		
@@ -308,5 +305,11 @@ public class ScriptParserDataAdapter extends DataAdapter {
 	public String getNewMainString(String key) {
 		// TODO Auto-generated method stub
 		return null;
+	}
+	
+	public void writeNewExtraString(String string) {
+		if(currentBlock != null && currentBlock.getClass() == ExtraStringConvoData.class) {
+			((ExtraStringConvoData) currentBlock).setNewExtraInfoString(string);
+		}
 	}
 }

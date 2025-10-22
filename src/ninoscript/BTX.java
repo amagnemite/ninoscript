@@ -3,14 +3,12 @@ package ninoscript;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -21,7 +19,11 @@ public class BTX {
 	private static final int NAMELENGTH = 16;
 	
 	private static final int A3I5 = 1;
+	private static final int COLORS16 = 3;
+	private static final int COLORS256 = 4;
 	private static final int A3I5STEPS = 32;
+	
+	private static final int[] BITDEPTHS = {0, 8, 2, 4, 8, 3, 8, 16};
 	
 	private int totalFilesize;
 	private int tex0Offset;
@@ -45,6 +47,7 @@ public class BTX {
 	private int texDictSize;
 	private List<TextureDictionaryEntry> texDict = new ArrayList<TextureDictionaryEntry>();
 	private List<String> texNames = new ArrayList<String>();
+	private List<byte[]> textureBytes = new ArrayList<byte[]>();
 	
 	private int paletteCount;
 	private int paletteInfoSize;
@@ -53,8 +56,8 @@ public class BTX {
 	private int paletteDictSize;
 	private List<PaletteDictionaryEntry> paletteDict = new ArrayList<PaletteDictionaryEntry>();
 	private List<String> paletteNames = new ArrayList<String>();
+	private List<List<Integer>> palettes = new ArrayList<List<Integer>>();
 	
-	private List<Integer> colors = new ArrayList<Integer>();
 	private ByteBuffer textureDataBuffer;
 	
 	public BTX(byte[] data) throws IOException {
@@ -123,13 +126,13 @@ public class BTX {
 			int width = 8 << ((textureData >> 4) & 0x7);
 			int height = 8 <<  ((textureData >> 7) & 0x7);
 			int format = (textureData >> 10) & 0x7;
-			int paletteMode = (textureData >> 13) & 0x1;
+			int paletteColor0Mode = (textureData >> 13) & 0x1; //0 = displayed, 1 = transparent
 			
 			stream.skip(4); //width + height occurs twice
-			texDict.add(new TextureDictionaryEntry(textureOffset, width, height, format, paletteMode));
+			texDict.add(new TextureDictionaryEntry(textureOffset, width, height, format, paletteColor0Mode));
 		}
 		for(int i = 0; i < textureCount; i++) {
-			byte[] charBytes = new byte[16];
+			byte[] charBytes = new byte[NAMELENGTH];
 			stream.read(charBytes);
 			texNames.add(new String(charBytes, "US-ASCII"));
 		}
@@ -154,34 +157,118 @@ public class BTX {
 			paletteDict.add(new PaletteDictionaryEntry(paletteOffset, unknown));
 		}
 		for(int i = 0; i < paletteCount; i++) {
-			byte[] charBytes = new byte[16];
+			byte[] charBytes = new byte[NAMELENGTH];
 			stream.read(charBytes);
 			paletteNames.add(new String(charBytes, "US-ASCII"));
 		}
 		
 		stream.reset();
-		stream.skip(paletteOffset);
-		int color = stream.readU16();
-		while(color != -1) {
-			/*
-			int r = (color & 0x1F) * 0x8;
-			int g = ((color >> 5) & 0x1F) * 0x8;
-			int b = ((color >> 10) & 0x1F) * 0x8;
-			//to rgb8888
-			colors.add(b | g << 8 | r << 16 | 255 << 24); //no transparency
-			*/
-			colors.add(color);
-			color = stream.readU16();
-		}
-		
-		stream.reset();
 		stream.skip(texDataOffset);
+		
+		for(int i = 0; i < textureCount; i++) {
+			TextureDictionaryEntry texEntry = texDict.get(i);
+			byte[] bytes = new byte[texEntry.width() * texEntry.height() * BITDEPTHS[texEntry.format()] / 8];
+			stream.read(bytes);
+			textureBytes.add(bytes);
+		}
+		/*
 		textureDataBuffer = ByteBuffer.allocate(texDataSize);
 		textureDataBuffer.order(ByteOrder.LITTLE_ENDIAN);
 		stream.read(textureDataBuffer.array(), 0, texDataSize);
+		*/
+		
+		for(int i = 0; i < paletteCount; i++) {
+			List<Integer> colors = new ArrayList<Integer>();
+			
+			stream.reset();
+			stream.skip(paletteOffset);
+			stream.skip(paletteDict.get(i).paletteOffset());
+			//is it always from offset to end of file?
+			
+			int color = stream.readU16();
+			while(color != -1) {
+				colors.add(color);
+				color = stream.readU16();
+			}
+			palettes.add(colors);
+		}
 	}
 	
-	public void convertNewImage(File png) {
+	public void convertBTXToPNG(boolean useSubPalettes, File file) {
+		//only deal with the first texture for now
+		TextureDictionaryEntry texEntry = texDict.get(0);
+		List<Integer> colors = palettes.get(0);
+		byte[] texBytes = textureBytes.get(0);
+		int[] newBytes = new int[texEntry.width() * texEntry.height()];
+		int[] rgbColors;
+		
+		BufferedImage image = new BufferedImage(texEntry.width(), texEntry.height(), BufferedImage.TYPE_INT_ARGB);
+		
+		switch(texEntry.format()) {
+			case COLORS16:
+				if(useSubPalettes) { //divide 256 palette into 16 16 palettes
+					int subPaletteCount = colors.size() / 16;
+					for(int i = 0; i < subPaletteCount; i++) {
+						rgbColors = new int[16];
+						
+						for(int j = 0; j < 16; j++) {
+							rgbColors[j] = toRGB888(colors.get(i * 16 + j)) | 255 << 24;
+						}
+						
+						rgbColors[0] = texEntry.paletteMode() == 1 ? 0 : rgbColors[0];
+						
+						int k = 0;
+						for(int j = 0; j < texBytes.length; j++) {
+							int twoPixels = texBytes[j] & 0xFF;
+							
+							newBytes[k] = rgbColors[twoPixels & 0xF];
+							newBytes[k + 1] = rgbColors[(twoPixels >> 4) & 0xF];
+							k+=2;
+						}
+						
+						image.setRGB(0, 0, texEntry.width(), texEntry.height(), newBytes, 0, texEntry.width());
+						
+						try {
+							ImageIO.write(image, "png", new File(file.getParent(), "_" + i + ".png"));
+						}
+						catch(IOException e) {
+						}
+					}
+				}
+				break;
+			case COLORS256:
+				rgbColors = new int[256];
+				
+				rgbColors[0] = texEntry.paletteMode() == 1 ? 0 : toRGB888(colors.get(0)) | 255 << 24;
+				
+				for(int i = 1; i < 256; i++) {					
+					rgbColors[i] = toRGB888(colors.get(i)) | 255 << 24; //no transparency
+				}
+				
+				for(int i = 0; i < texBytes.length; i++) { //256 colors is 1 byte per pixel			
+					newBytes[i] = rgbColors[texBytes[i] & 0xFF];
+				}
+				
+				image.setRGB(0, 0, texEntry.width(), texEntry.height(), newBytes, 0, texEntry.width());
+				
+				try {
+					ImageIO.write(image, "png", file);
+				}
+				catch(IOException e) {
+				}
+				break;
+				
+		}
+	}
+	
+	private int toRGB888(int bgr555) {
+		int r = (bgr555 & 0x1F) * 0x8;
+		int g = ((bgr555 >> 5) & 0x1F) * 0x8;
+		int b = ((bgr555 >> 10) & 0x1F) * 0x8;
+		return b | g << 8 | r << 16;
+	}
+	
+	public void convertPNGToBTX(File png) {
 		//assume that original textures have one palette and all pixels in the new image match it
 		BufferedImage image;
 		
@@ -200,6 +287,7 @@ public class BTX {
 		image.getRGB(0, 0, width, height, pixels, 0, width);
 		TextureDictionaryEntry texEntry = texDict.get(0);
 		textureDataBuffer = ByteBuffer.allocate(width * height);
+		List<Integer> colors = palettes.get(0);
 		
 		for(int pixel : pixels) {
 			int alpha = (pixel >> 24) & 0xFF;
@@ -236,7 +324,7 @@ public class BTX {
 		texDict.set(0, new TextureDictionaryEntry(texEntry.textureOffset(), width, height, texEntry.format(), texEntry.paletteMode()));
 	}
 	
-	public void write(File file, byte[] preTextureBytes) {;
+	public void writeBTX(File file, byte[] preTextureBytes) {;
 		ByteArrayOutputStream output = new ByteArrayOutputStream();
 		output.writeBytes(preTextureBytes);
 		
@@ -343,6 +431,7 @@ public class BTX {
 		}
 		
 		output.writeBytes(textureDataBuffer.array());
+		List<Integer> colors = palettes.get(0);
 		for(int color : colors) {
 			output.writeBytes(twoByteBuffer.putShort(0, (short) color).array());
 		}
